@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { Link as RouterLink, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { apiMessage } from "../api/client";
 import { useAuth } from "../auth/AuthProvider";
+import { BrandLogo } from "../components/BrandLogo";
 
 interface LoginFields { email: string; password: string }
 
@@ -38,7 +39,7 @@ export function LoginPage() {
   });
   return <Box className="login-shell">
     <Box className="login-panel"><Box width="100%" maxWidth={430}>
-      <Stack direction="row" alignItems="center" spacing={1.3} mb={5}><span className="brand-mark">RT</span><Typography variant="h5" letterSpacing="-.04em">RepairTrack</Typography></Stack>
+      <Box mb={4}><BrandLogo className="brand-logo--login" /></Box>
       <Typography variant="h3" fontWeight={800} letterSpacing="-.055em" mb={1}>Welcome back</Typography>
       <Typography color="text.secondary" mb={4}>Sign in to manage repairs, or check the status of your own device.</Typography>
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}

@@ -3,9 +3,10 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link as RouterLink, useNavigate, useSearchParams } from "react-router-dom";
 import { api, apiMessage } from "../api/client";
+import { BrandLogo } from "../components/BrandLogo";
 
 function AuthCard({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
-  return <Box minHeight="100vh" display="grid" bgcolor="background.default" sx={{ placeItems: "center" }} p={2}><Card sx={{ width: "100%", maxWidth: 500 }}><CardContent sx={{ p: { xs: 3, sm: 5 } }}><Stack direction="row" alignItems="center" gap={1.2} mb={4}><span className="brand-mark">RT</span><Typography variant="h6">RepairTrack</Typography></Stack><Typography variant="h4" fontWeight={800}>{title}</Typography><Typography color="text.secondary" mt={1} mb={3}>{description}</Typography>{children}</CardContent></Card></Box>;
+  return <Box minHeight="100vh" display="grid" bgcolor="background.default" sx={{ placeItems: "center" }} p={2}><Card sx={{ width: "100%", maxWidth: 500 }}><CardContent sx={{ p: { xs: 3, sm: 5 } }}><Box mb={3}><BrandLogo className="brand-logo--auth" /></Box><Typography variant="h4" fontWeight={800}>{title}</Typography><Typography color="text.secondary" mt={1} mb={3}>{description}</Typography>{children}</CardContent></Card></Box>;
 }
 
 interface SignupFields { businessId: string; fullName: string; email: string; phone: string; password: string }

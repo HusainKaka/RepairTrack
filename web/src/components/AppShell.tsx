@@ -21,6 +21,7 @@ import { useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import type { Role } from "../types";
+import { BrandLogo } from "./BrandLogo";
 
 const drawerWidth = 268;
 interface NavItem { label: string; to: string; icon: ReactNode; roles: Role[] }
@@ -51,7 +52,7 @@ export function AppShell({ mode, toggleMode }: { mode: "light" | "dark"; toggleM
   if (!user) return null;
   const items = nav.filter((item) => item.roles.includes(user.role));
   const drawer = <Box height="100%" display="flex" flexDirection="column">
-    <Stack direction="row" alignItems="center" spacing={1.4} px={2.5} py={2.4}><span className="brand-mark">RT</span><Box><Typography fontWeight={850} fontSize={19} letterSpacing="-.04em">RepairTrack</Typography><Typography variant="caption" color="text.secondary">Operations console</Typography></Box>{mobile && <IconButton sx={{ ml: "auto" }} onClick={() => setOpen(false)}><ChevronLeft /></IconButton>}</Stack>
+    <Stack direction="row" alignItems="center" spacing={1.4} px={2.5} py={1.5}><BrandLogo className="brand-logo--nav" />{mobile && <IconButton sx={{ ml: "auto" }} onClick={() => setOpen(false)}><ChevronLeft /></IconButton>}</Stack>
     <Divider />
     <List sx={{ px: 1.5, py: 2, flex: 1 }}>{items.map((item) => <ListItemButton key={item.to} component={NavLink} to={item.to} onClick={() => setOpen(false)} selected={location.pathname === item.to} sx={{ mb: .5, borderRadius: 2.5, "&.Mui-selected": { color: "primary.main", bgcolor: "primary.main", backgroundImage: "linear-gradient(90deg, rgba(37,99,235,.12), rgba(37,99,235,.04))" } }}><ListItemIcon sx={{ minWidth: 42, color: "inherit" }}>{item.icon}</ListItemIcon><ListItemText primary={item.label} primaryTypographyProps={{ fontWeight: 650, fontSize: 14 }} /></ListItemButton>)}</List>
     <Divider />

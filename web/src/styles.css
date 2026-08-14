@@ -8,11 +8,15 @@ a { color: inherit; text-decoration: none; }
 .login-panel { display: flex; align-items: center; justify-content: center; padding: 48px; background: #fff; }
 .login-story { position: relative; overflow: hidden; color: #fff; padding: 68px; background: radial-gradient(circle at 78% 15%, rgba(37,99,235,.75), transparent 28%), linear-gradient(145deg, #0F172A, #172554 52%, #1D4ED8); display: flex; flex-direction: column; justify-content: space-between; }
 .login-story::after { content: ""; position: absolute; width: 520px; height: 520px; border: 1px solid rgba(255,255,255,.12); border-radius: 50%; right: -210px; bottom: -210px; box-shadow: 0 0 0 80px rgba(255,255,255,.035), 0 0 0 160px rgba(255,255,255,.02); }
-.brand-mark { width: 40px; height: 40px; border-radius: 12px; display: inline-grid; place-items: center; color: white; background: #2563EB; font-weight: 900; letter-spacing: -.08em; }
+.brand-logo { position: relative; display: inline-block; flex: 0 0 auto; width: 120px; aspect-ratio: 1032 / 696; overflow: hidden; border-radius: 8px; background: #fff; }
+.brand-logo img { position: absolute; width: 193.798%; max-width: none; height: auto; left: -30.814%; top: -93.678%; }
+.brand-logo--nav { width: 126px; }
+.brand-logo--login { width: 164px; }
+.brand-logo--auth { width: 132px; }
+.brand-logo--tracker { width: 104px; }
 .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; }
 .metric-accent { height: 4px; width: 40px; border-radius: 99px; margin-bottom: 16px; }
 .page-enter { animation: page-in .25s ease both; }
 @keyframes page-in { from { opacity: 0; transform: translateY(5px); } }
 @media (max-width: 900px) { .login-shell { grid-template-columns: 1fr; } .login-story { display: none; } .login-panel { padding: 28px 20px; } }
 @media print { .no-print { display: none !important; } body { background: white !important; } }
-
