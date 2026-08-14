@@ -1,0 +1,11 @@
+packages:
+  - backend
+  - web
+
+confirmModulesPurge: false
+allowBuilds:
+  '@prisma/client': true
+  '@prisma/engines': true
+  argon2: true
+  esbuild: true
+  prisma: true

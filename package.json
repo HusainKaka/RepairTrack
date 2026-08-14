@@ -1,0 +1,22 @@
+{
+  "name": "repairtrack",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Secure multi-tenant repair management platform with web and Android clients",
+  "packageManager": "pnpm@10.15.1",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "build": "pnpm --filter @repairtrack/backend build && pnpm --filter @repairtrack/web build",
+    "dev": "pnpm --parallel --filter @repairtrack/backend --filter @repairtrack/web dev",
+    "lint": "pnpm --filter @repairtrack/backend lint && pnpm --filter @repairtrack/web lint",
+    "test": "pnpm --filter @repairtrack/backend test && pnpm --filter @repairtrack/web test",
+    "typecheck": "pnpm --filter @repairtrack/backend typecheck && pnpm --filter @repairtrack/web typecheck",
+    "format:check": "prettier --check .",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2"
+  }
+}

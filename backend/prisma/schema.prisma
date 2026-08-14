@@ -1,0 +1,685 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleCode {
+  SUPER_ADMIN
+  BUSINESS_ADMIN
+  TECHNICIAN
+  CUSTOMER
+}
+
+enum AccountStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  DISABLED
+  LOCKED
+  DELETION_REQUESTED
+  DELETED
+}
+
+enum BusinessStatus {
+  ACTIVE
+  SUSPENDED
+  INACTIVE
+  DELETED
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+}
+
+enum RepairStatus {
+  RECEIVED
+  DIAGNOSING
+  AWAITING_CUSTOMER_APPROVAL
+  WAITING_FOR_PARTS
+  IN_PROGRESS
+  TESTING
+  COMPLETED
+  READY_FOR_COLLECTION
+  COLLECTED
+  CANCELLED
+}
+
+enum RepairPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum NoteVisibility {
+  INTERNAL
+  CUSTOMER
+}
+
+enum InventoryTransactionType {
+  STOCK_IN
+  STOCK_OUT
+  ADJUSTMENT
+  REPAIR_USAGE
+  RETURN
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  MPESA
+  OTHER
+}
+
+enum NotificationChannel {
+  EMAIL
+  PUSH
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  READ
+}
+
+model Business {
+  id                    String                 @id @default(uuid()) @db.Uuid
+  name                  String
+  logoUrl               String?
+  registrationNumber    String?                @unique
+  taxPin                String?
+  email                 String
+  phone                 String
+  whatsapp              String?
+  address               String
+  city                  String
+  country               String                 @default("Kenya")
+  currency              String                 @default("KES")
+  taxRate               Decimal                @default(0) @db.Decimal(5, 2)
+  receiptFooter         String?
+  invoiceFooter         String?
+  workingHours          Json?
+  timeZone              String                 @default("Africa/Nairobi")
+  status                BusinessStatus         @default(ACTIVE)
+  subscriptionStatus    SubscriptionStatus     @default(TRIAL)
+  primaryAdminId        String?                @unique @db.Uuid
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  deletedAt             DateTime?
+  primaryAdmin          User?                  @relation("PrimaryBusinessAdmin", fields: [primaryAdminId], references: [id], onDelete: SetNull)
+  users                 User[]                 @relation("BusinessUsers")
+  customers             Customer[]
+  devices               Device[]
+  repairs               Repair[]
+  repairStatusHistory   RepairStatusHistory[]
+  repairNotes           RepairNote[]
+  repairAssignments     RepairAssignment[]
+  suppliers             Supplier[]
+  inventoryItems        InventoryItem[]
+  inventoryTransactions InventoryTransaction[]
+  repairParts           RepairPart[]
+  invoices              Invoice[]
+  invoiceItems          InvoiceItem[]
+  payments              Payment[]
+  receipts              Receipt[]
+  notifications         Notification[]
+  auditLogs             AuditLog[]
+  settings              Setting[]
+  sequences             SequenceCounter[]
+
+  @@index([status])
+  @@map("businesses")
+}
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        RoleCode @unique
+  name        String
+  description String?
+  users       User[]
+
+  @@map("roles")
+}
+
+model User {
+  id                      String                 @id @default(uuid()) @db.Uuid
+  businessId              String?                @db.Uuid
+  roleId                  String                 @db.Uuid
+  email                   String                 @unique
+  passwordHash            String?
+  fullName                String
+  phone                   String?
+  avatarUrl               String?
+  googleSubject           String?                @unique
+  emailVerifiedAt         DateTime?
+  status                  AccountStatus          @default(PENDING_VERIFICATION)
+  failedLoginCount        Int                    @default(0)
+  lockedUntil             DateTime?
+  lastLoginAt             DateTime?
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  deletedAt               DateTime?
+  business                Business?              @relation("BusinessUsers", fields: [businessId], references: [id], onDelete: Restrict)
+  primaryAdminOf          Business?              @relation("PrimaryBusinessAdmin")
+  role                    Role                   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  customerProfile         Customer?
+  assignedRepairs         Repair[]               @relation("AssignedTechnician")
+  repairNotes             RepairNote[]           @relation("RepairNoteAuthor")
+  assignmentsAsTechnician RepairAssignment[]     @relation("AssignmentTechnician")
+  assignmentsMade         RepairAssignment[]     @relation("AssignmentActor")
+  inventoryTransactions   InventoryTransaction[]
+  repairParts             RepairPart[]
+  payments                Payment[]
+  receipts                Receipt[]
+  notifications           Notification[]
+  auditLogs               AuditLog[]
+  sessions                Session[]
+  passwordResets          PasswordReset[]
+  emailVerifications      EmailVerification[]
+  completedSetup          SetupLock?
+  pushTokens              DevicePushToken[]
+
+  @@index([businessId, roleId])
+  @@index([status])
+  @@map("users")
+}
+
+model Customer {
+  id               String        @id @default(uuid()) @db.Uuid
+  businessId       String        @db.Uuid
+  userId           String?       @unique @db.Uuid
+  fullName         String
+  email            String?
+  phone            String
+  alternativePhone String?
+  address          String?
+  notes            String?
+  status           AccountStatus @default(ACTIVE)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  deletedAt        DateTime?
+  business         Business      @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  user             User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  devices          Device[]
+  repairs          Repair[]
+  invoices         Invoice[]
+  payments         Payment[]
+
+  @@unique([businessId, phone])
+  @@index([businessId, fullName])
+  @@index([businessId, email])
+  @@map("customers")
+}
+
+model Device {
+  id                String    @id @default(uuid()) @db.Uuid
+  businessId        String    @db.Uuid
+  customerId        String    @db.Uuid
+  type              String
+  brand             String
+  model             String
+  serialNumber      String?
+  imei              String?
+  colour            String?
+  storageCapacity   String?
+  ram               String?
+  accessories       String?
+  physicalCondition String?
+  reportedFault     String
+  imageUrls         String[]
+  warrantyStatus    String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+  business          Business  @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  customer          Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  repairs           Repair[]
+
+  @@unique([businessId, serialNumber])
+  @@unique([businessId, imei])
+  @@index([businessId, customerId])
+  @@index([businessId, brand, model])
+  @@map("devices")
+}
+
+model Repair {
+  id                      String                @id @default(uuid()) @db.Uuid
+  businessId              String                @db.Uuid
+  customerId              String                @db.Uuid
+  deviceId                String                @db.Uuid
+  reference               String
+  publicTrackingTokenHash String                @unique
+  reportedIssue           String
+  diagnosis               String?
+  assignedTechnicianId    String?               @db.Uuid
+  estimatedCost           Decimal?              @db.Decimal(12, 2)
+  estimatedCompletionAt   DateTime?
+  priority                RepairPriority        @default(NORMAL)
+  status                  RepairStatus          @default(RECEIVED)
+  warrantyInformation     String?
+  internalNotes           String?
+  customerVisibleNotes    String?
+  acceptedAt              DateTime?
+  completedAt             DateTime?
+  collectedAt             DateTime?
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+  deletedAt               DateTime?
+  business                Business              @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  customer                Customer              @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  device                  Device                @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  assignedTechnician      User?                 @relation("AssignedTechnician", fields: [assignedTechnicianId], references: [id], onDelete: SetNull)
+  statusHistory           RepairStatusHistory[]
+  notes                   RepairNote[]
+  assignments             RepairAssignment[]
+  parts                   RepairPart[]
+  invoices                Invoice[]
+  receipts                Receipt[]
+  notifications           Notification[]
+
+  @@unique([businessId, reference])
+  @@index([businessId, status])
+  @@index([businessId, assignedTechnicianId])
+  @@index([businessId, createdAt])
+  @@map("repairs")
+}
+
+model RepairStatusHistory {
+  id              String        @id @default(uuid()) @db.Uuid
+  businessId      String        @db.Uuid
+  repairId        String        @db.Uuid
+  fromStatus      RepairStatus?
+  toStatus        RepairStatus
+  changedByUserId String?       @db.Uuid
+  customerMessage String?
+  createdAt       DateTime      @default(now())
+  business        Business      @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  repair          Repair        @relation(fields: [repairId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, repairId, createdAt])
+  @@map("repair_status_history")
+}
+
+model RepairNote {
+  id         String         @id @default(uuid()) @db.Uuid
+  businessId String         @db.Uuid
+  repairId   String         @db.Uuid
+  authorId   String         @db.Uuid
+  body       String
+  visibility NoteVisibility @default(INTERNAL)
+  imageUrls  String[]
+  createdAt  DateTime       @default(now())
+  business   Business       @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  repair     Repair         @relation(fields: [repairId], references: [id], onDelete: Cascade)
+  author     User           @relation("RepairNoteAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([businessId, repairId, createdAt])
+  @@map("repair_notes")
+}
+
+model RepairAssignment {
+  id           String    @id @default(uuid()) @db.Uuid
+  businessId   String    @db.Uuid
+  repairId     String    @db.Uuid
+  technicianId String    @db.Uuid
+  assignedById String    @db.Uuid
+  assignedAt   DateTime  @default(now())
+  unassignedAt DateTime?
+  business     Business  @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  repair       Repair    @relation(fields: [repairId], references: [id], onDelete: Cascade)
+  technician   User      @relation("AssignmentTechnician", fields: [technicianId], references: [id], onDelete: Restrict)
+  assignedBy   User      @relation("AssignmentActor", fields: [assignedById], references: [id], onDelete: Restrict)
+
+  @@index([businessId, technicianId, unassignedAt])
+  @@index([repairId, assignedAt])
+  @@map("repair_assignments")
+}
+
+model Supplier {
+  id         String          @id @default(uuid()) @db.Uuid
+  businessId String          @db.Uuid
+  name       String
+  email      String?
+  phone      String?
+  address    String?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  deletedAt  DateTime?
+  business   Business        @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  items      InventoryItem[]
+
+  @@unique([businessId, name])
+  @@map("suppliers")
+}
+
+model InventoryItem {
+  id           String                 @id @default(uuid()) @db.Uuid
+  businessId   String                 @db.Uuid
+  supplierId   String?                @db.Uuid
+  sku          String
+  barcode      String?
+  name         String
+  category     String
+  purchaseCost Decimal                @db.Decimal(12, 2)
+  sellingPrice Decimal                @db.Decimal(12, 2)
+  quantity     Int                    @default(0)
+  minimumStock Int                    @default(0)
+  location     String?
+  warranty     String?
+  isActive     Boolean                @default(true)
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+  deletedAt    DateTime?
+  business     Business               @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  supplier     Supplier?              @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  transactions InventoryTransaction[]
+  repairParts  RepairPart[]
+
+  @@unique([businessId, sku])
+  @@unique([businessId, barcode])
+  @@index([businessId, name])
+  @@index([businessId, quantity])
+  @@map("inventory_items")
+}
+
+model InventoryTransaction {
+  id              String                   @id @default(uuid()) @db.Uuid
+  businessId      String                   @db.Uuid
+  inventoryItemId String                   @db.Uuid
+  performedById   String                   @db.Uuid
+  type            InventoryTransactionType
+  quantityDelta   Int
+  quantityAfter   Int
+  reference       String?
+  notes           String?
+  createdAt       DateTime                 @default(now())
+  business        Business                 @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  inventoryItem   InventoryItem            @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  performedBy     User                     @relation(fields: [performedById], references: [id], onDelete: Restrict)
+
+  @@index([businessId, inventoryItemId, createdAt])
+  @@map("inventory_transactions")
+}
+
+model RepairPart {
+  id              String        @id @default(uuid()) @db.Uuid
+  businessId      String        @db.Uuid
+  repairId        String        @db.Uuid
+  inventoryItemId String        @db.Uuid
+  technicianId    String        @db.Uuid
+  quantity        Int
+  unitPrice       Decimal       @db.Decimal(12, 2)
+  createdAt       DateTime      @default(now())
+  business        Business      @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  repair          Repair        @relation(fields: [repairId], references: [id], onDelete: Cascade)
+  inventoryItem   InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  technician      User          @relation(fields: [technicianId], references: [id], onDelete: Restrict)
+
+  @@index([businessId, repairId])
+  @@map("repair_parts")
+}
+
+model Invoice {
+  id             String        @id @default(uuid()) @db.Uuid
+  businessId     String        @db.Uuid
+  customerId     String        @db.Uuid
+  repairId       String?       @db.Uuid
+  number         String
+  issuedAt       DateTime?
+  dueAt          DateTime?
+  status         InvoiceStatus @default(DRAFT)
+  subtotal       Decimal       @default(0) @db.Decimal(12, 2)
+  taxAmount      Decimal       @default(0) @db.Decimal(12, 2)
+  discountAmount Decimal       @default(0) @db.Decimal(12, 2)
+  total          Decimal       @default(0) @db.Decimal(12, 2)
+  amountPaid     Decimal       @default(0) @db.Decimal(12, 2)
+  balance        Decimal       @default(0) @db.Decimal(12, 2)
+  paymentStatus  PaymentStatus @default(UNPAID)
+  terms          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  deletedAt      DateTime?
+  business       Business      @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  customer       Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  repair         Repair?       @relation(fields: [repairId], references: [id], onDelete: SetNull)
+  items          InvoiceItem[]
+  payments       Payment[]
+  receipts       Receipt[]
+
+  @@unique([businessId, number])
+  @@index([businessId, status, createdAt])
+  @@index([businessId, customerId])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id          String   @id @default(uuid()) @db.Uuid
+  businessId  String   @db.Uuid
+  invoiceId   String   @db.Uuid
+  description String
+  quantity    Decimal  @db.Decimal(10, 2)
+  unitPrice   Decimal  @db.Decimal(12, 2)
+  taxRate     Decimal  @default(0) @db.Decimal(5, 2)
+  discount    Decimal  @default(0) @db.Decimal(12, 2)
+  lineTotal   Decimal  @db.Decimal(12, 2)
+  sourceType  String?
+  sourceId    String?
+  createdAt   DateTime @default(now())
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, invoiceId])
+  @@map("invoice_items")
+}
+
+model Payment {
+  id                   String        @id @default(uuid()) @db.Uuid
+  businessId           String        @db.Uuid
+  invoiceId            String        @db.Uuid
+  customerId           String        @db.Uuid
+  recordedById         String        @db.Uuid
+  number               String
+  amount               Decimal       @db.Decimal(12, 2)
+  method               PaymentMethod
+  customMethod         String?
+  transactionReference String?
+  paidAt               DateTime      @default(now())
+  notes                String?
+  createdAt            DateTime      @default(now())
+  business             Business      @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  invoice              Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  customer             Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  recordedBy           User          @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+  receipt              Receipt?
+
+  @@unique([businessId, number])
+  @@index([businessId, paidAt])
+  @@map("payments")
+}
+
+model Receipt {
+  id             String        @id @default(uuid()) @db.Uuid
+  businessId     String        @db.Uuid
+  paymentId      String        @unique @db.Uuid
+  invoiceId      String        @db.Uuid
+  repairId       String?       @db.Uuid
+  issuedById     String        @db.Uuid
+  number         String
+  paperWidth     String        @default("A4")
+  statusSnapshot RepairStatus?
+  issuedAt       DateTime      @default(now())
+  business       Business      @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  payment        Payment       @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  invoice        Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  repair         Repair?       @relation(fields: [repairId], references: [id], onDelete: SetNull)
+  issuedBy       User          @relation(fields: [issuedById], references: [id], onDelete: Restrict)
+
+  @@unique([businessId, number])
+  @@index([businessId, issuedAt])
+  @@map("receipts")
+}
+
+model Notification {
+  id            String              @id @default(uuid()) @db.Uuid
+  businessId    String              @db.Uuid
+  userId        String?             @db.Uuid
+  repairId      String?             @db.Uuid
+  channel       NotificationChannel
+  status        NotificationStatus  @default(PENDING)
+  template      String
+  recipient     String
+  subject       String?
+  body          String
+  providerId    String?
+  failureReason String?
+  sentAt        DateTime?
+  readAt        DateTime?
+  createdAt     DateTime            @default(now())
+  business      Business            @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  user          User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  repair        Repair?             @relation(fields: [repairId], references: [id], onDelete: SetNull)
+
+  @@index([businessId, status, createdAt])
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id           String    @id @default(uuid()) @db.Uuid
+  businessId   String?   @db.Uuid
+  userId       String?   @db.Uuid
+  userRole     String?
+  action       String
+  resourceType String
+  resourceId   String?
+  requestId    String?
+  ipAddress    String?
+  userAgent    String?
+  metadata     Json?
+  createdAt    DateTime  @default(now())
+  business     Business? @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  user         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([businessId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}
+
+model Session {
+  id                  String    @id @default(uuid()) @db.Uuid
+  userId              String    @db.Uuid
+  refreshTokenHash    String    @unique
+  expiresAt           DateTime
+  lastUsedAt          DateTime  @default(now())
+  revokedAt           DateTime?
+  replacedBySessionId String?   @db.Uuid
+  ipAddress           String?
+  userAgent           String?
+  createdAt           DateTime  @default(now())
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt, expiresAt])
+  @@map("sessions")
+}
+
+model PasswordReset {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("password_resets")
+}
+
+model EmailVerification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("email_verifications")
+}
+
+model Setting {
+  id         String    @id @default(uuid()) @db.Uuid
+  businessId String?   @db.Uuid
+  scope      String
+  key        String
+  value      Json
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  business   Business? @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([scope, key])
+  @@index([businessId, key])
+  @@map("settings")
+}
+
+model SetupLock {
+  id          String   @id @default("primary")
+  completedAt DateTime
+  userId      String   @unique @db.Uuid
+  user        User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@map("setup_locks")
+}
+
+model SequenceCounter {
+  id         String   @id @default(uuid()) @db.Uuid
+  businessId String   @db.Uuid
+  kind       String
+  value      Int      @default(0)
+  updatedAt  DateTime @updatedAt
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, kind])
+  @@map("sequence_counters")
+}
+
+model DevicePushToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @db.Uuid
+  businessId String?   @db.Uuid
+  token      String    @unique
+  platform   String
+  lastSeenAt DateTime  @default(now())
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@map("device_push_tokens")
+}
