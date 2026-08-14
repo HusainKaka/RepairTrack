@@ -1,0 +1,55 @@
+# JavaScript / TypeScript
+node_modules/
+node_modules-broken/
+node_modules-sandbox-partial/
+.tools/
+android/local.properties
+android/.gradle/
+android/**/build/
+*.jks
+*.keystore
+google-services.json
+service-account*.json
+dist/
+coverage/
+backend/src/generated/
+*.tsbuildinfo
+.vite/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+google-services.json
+service-account*.json
+
+# Android / Gradle
+.gradle/
+android/local.properties
+android/**/build/
+android/.idea/
+*.apk
+*.aab
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Runtime files and uploads
+uploads/
+logs/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+
+# Previous classroom prototype (preserved locally, excluded from production source)
+legacy-php/
