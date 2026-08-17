@@ -2,24 +2,29 @@ import { InvoiceStatus, PaymentStatus, type Prisma, type PrismaClient } from "..
 import { AppError } from "../../errors/app-error.js";
 import { nextDocumentNumber } from "../../lib/identifiers.js";
 import { calculateInvoice } from "./invoice-calculation.js";
+import { defaultLabourItem } from "./invoice-policy.js";
 
 type TransactionClient = Prisma.TransactionClient;
 
-export async function recalculateInvoice(tx: TransactionClient, invoiceId: string, invoiceDiscount = 0): Promise<void> {
+export async function recalculateInvoice(tx: TransactionClient, invoiceId: string, invoiceDiscount?: number): Promise<void> {
   const invoice = await tx.invoice.findUnique({ where: { id: invoiceId }, include: { items: true } });
   if (!invoice) throw new AppError(404, "INVOICE_NOT_FOUND", "Invoice was not found.");
-  const calculation = calculateInvoice(invoice.items.map((item) => ({ quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), taxRate: Number(item.taxRate), discount: Number(item.discount) })), invoiceDiscount);
+  const appliedInvoiceDiscount = invoiceDiscount ?? Number(invoice.invoiceLevelDiscount);
+  const calculation = calculateInvoice(invoice.items.map((item) => ({ quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), taxRate: Number(item.taxRate), discount: Number(item.discount) })), appliedInvoiceDiscount);
   const amountPaid = Number(invoice.amountPaid);
   const balance = Math.max(calculation.total - amountPaid, 0);
   const paymentStatus = balance === 0 ? PaymentStatus.PAID : amountPaid > 0 ? PaymentStatus.PARTIALLY_PAID : PaymentStatus.UNPAID;
-  await tx.invoice.update({ where: { id: invoiceId }, data: { subtotal: calculation.subtotal, taxAmount: calculation.taxAmount, discountAmount: calculation.discountAmount, total: calculation.total, balance, paymentStatus, status: paymentStatus === PaymentStatus.PAID ? InvoiceStatus.PAID : invoice.status === InvoiceStatus.PAID ? InvoiceStatus.ISSUED : invoice.status } });
+  await tx.invoice.update({ where: { id: invoiceId }, data: { subtotal: calculation.subtotal, taxAmount: calculation.taxAmount, discountAmount: calculation.discountAmount, invoiceLevelDiscount: appliedInvoiceDiscount, total: calculation.total, balance, paymentStatus, status: paymentStatus === PaymentStatus.PAID ? InvoiceStatus.PAID : invoice.status === InvoiceStatus.PAID ? InvoiceStatus.ISSUED : invoice.status } });
 }
 
 export async function ensureDraftInvoice(tx: TransactionClient, businessId: string, customerId: string, repairId: string): Promise<string> {
   const existing = await tx.invoice.findFirst({ where: { businessId, repairId, status: InvoiceStatus.DRAFT, deletedAt: null } });
   if (existing) return existing.id;
   const number = await nextDocumentNumber(tx, businessId, "invoice", "INV");
-  const created = await tx.invoice.create({ data: { businessId, customerId, repairId, number } });
+  const business = await tx.business.findUniqueOrThrow({ where: { id: businessId }, select: { defaultLabourCharge: true, taxRate: true } });
+  const labour = defaultLabourItem(business.defaultLabourCharge, business.taxRate);
+  const calculation = labour.unitPrice > 0 ? calculateInvoice([labour]) : null;
+  const created = await tx.invoice.create({ data: { businessId, customerId, repairId, number, subtotal: calculation?.subtotal ?? 0, taxAmount: calculation?.taxAmount ?? 0, discountAmount: calculation?.discountAmount ?? 0, total: calculation?.total ?? 0, balance: calculation?.total ?? 0, items: labour.unitPrice > 0 ? { create: [{ businessId, repairId, description: labour.description, quantity: labour.quantity, unitPrice: labour.unitPrice, taxRate: labour.taxRate, discount: labour.discount, lineTotal: calculation!.lines[0]!.lineTotal, itemType: labour.itemType }] } : undefined } });
   return created.id;
 }
 
