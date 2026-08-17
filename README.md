@@ -2,7 +2,7 @@
 
 RepairTrack is a production-style, multi-tenant repair-management platform for electronics and ICT service businesses. One Express/PostgreSQL backend serves a responsive React web application and a native Kotlin Android application.
 
-The system covers business onboarding, customers, devices, repair workflows, technician assignment, inventory, invoices, partial payments, PDF invoices/receipts, secure QR tracking, notifications, reports, audit logs, and four roles: `SUPER_ADMIN`, `BUSINESS_ADMIN`, `TECHNICIAN`, and `CUSTOMER`.
+The system covers business onboarding, customers, devices, repair workflows, technician assignment, inventory, editable/voidable invoices, discounts, partial payments, PDF invoices/receipts, secure QR tracking and estimate approval, email/WhatsApp notification policy, costs and utilities, cash-basis profit reporting, subscription controls, KRA/eTIMS readiness, audit logs, and four roles: `SUPER_ADMIN`, `BUSINESS_ADMIN`, `TECHNICIAN`, and `CUSTOMER`.
 
 ## Repository layout
 
@@ -33,6 +33,7 @@ See [architecture](docs/architecture.md), [security](docs/security.md), and [dat
 - Node.js 20.19 or newer; Node 22 LTS is recommended
 - pnpm 10.x (`corepack enable` then `corepack prepare pnpm@10.15.1 --activate`)
 - PostgreSQL 15+ or Docker Desktop
+- Android Studio with JDK 17, Android SDK 36, and platform tools
 - Git
 
 External credentials are optional for local core workflows. Google Sign-In, SMTP delivery, Firebase push, and live M-Pesa require provider configuration and never report fake success when unconfigured.
@@ -95,7 +96,7 @@ External credentials are optional for local core workflows. Google Sign-In, SMTP
    API health: `http://localhost:4000/health`
    Database readiness: `http://localhost:4000/ready`
 
-Detailed instructions: [backend/first setup](docs/initial-setup.md), [web setup](docs/web-setup.md)
+Detailed instructions: [backend/first setup](docs/initial-setup.md), [web setup](docs/web-setup.md), and [Android setup](docs/android-setup.md).
 
 ## Environment configuration
 
@@ -109,7 +110,42 @@ Backend required values:
 | `PUBLIC_WEB_URL` | Public links used in mail and QR output |
 | `TRUST_PROXY` | `0` locally; set only for the known reverse-proxy depth |
 
-Optional integrations use `GOOGLE_WEB_CLIENT_ID`, `SMTP_*`, `FCM_*`, and `MPESA_*`. All keys are described in `backend/.env.example` and [deployment](docs/deployment.md). Web compile-time values are `VITE_API_URL` and `VITE_GOOGLE_CLIENT_ID`.
+Optional integrations use `GOOGLE_WEB_CLIENT_ID`, `SMTP_*`, `FCM_*`, `MPESA_*`, `WHATSAPP_*`, `KRA_ETIMS_*`, and `PAYMENT_GATEWAY_*`. All keys are described in `backend/.env.example` and [deployment](docs/deployment.md). Web compile-time values are `VITE_API_URL` and `VITE_GOOGLE_CLIENT_ID`.
+
+## Android application
+
+Open `android/` as the Android Studio project. Create `android/local.properties` with the SDK path and local settings:
+
+```properties
+sdk.dir=C\:\\Users\\you\\AppData\\Local\\Android\\Sdk
+repairtrack.apiUrl=http://10.0.2.2:4000/api/v1/
+repairtrack.googleWebClientId=
+repairtrack.firebaseApplicationId=
+repairtrack.firebaseApiKey=
+repairtrack.firebaseProjectId=
+repairtrack.firebaseSenderId=
+```
+
+Build from `android/`:
+
+```bash
+./gradlew clean assembleDebug testDebugUnitTest lintDebug
+```
+
+On Windows use `gradlew.bat`. The debug APK is generated at `android/app/build/outputs/apk/debug/app-debug.apk`. See [Android setup](docs/android-setup.md) for Google OAuth, Firebase, notification permission, emulator/network, QR scanning, offline sync, signing, and Bluetooth/Wi-Fi ESC/POS printing.
+
+## Validation commands
+
+```bash
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm --filter @repairtrack/backend prisma:validate
+cd android && ./gradlew clean assembleDebug testDebugUnitTest lintDebug
+```
+
+The checked project passes backend/web lint and type checks, focused backend/web tests, production builds, and Prisma schema validation. Connected Android UI tests require an emulator/device. A live production migration still requires the target PostgreSQL credentials and a verified backup; it must be run once as a release step, never during every Vercel build. See [testing](docs/testing.md) and [business upgrades](docs/business-upgrades.md).
 
 ## Documentation
 
@@ -118,6 +154,7 @@ Optional integrations use `GOOGLE_WEB_CLIENT_ID`, `SMTP_*`, `FCM_*`, and `MPESA_
 - [Initial admin](docs/initial-setup.md) · [Web](docs/web-setup.md) · [Android](docs/android-setup.md)
 - [Google Sign-In](docs/google-sign-in.md) · [M-Pesa readiness](docs/mpesa-integration.md)
 - [Testing](docs/testing.md) · [Deployment](docs/deployment.md) · [Troubleshooting](docs/troubleshooting.md)
+- [Business upgrades and migration checklist](docs/business-upgrades.md)
 - [User manual](docs/user-manual.md) · [Administrator](docs/administrator-manual.md) · [Technician](docs/technician-manual.md) · [Customer](docs/customer-manual.md)
 - [Developer guide](docs/developer-guide.md)
 
