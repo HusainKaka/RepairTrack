@@ -35,7 +35,19 @@ enum SubscriptionStatus {
   TRIAL
   ACTIVE
   PAST_DUE
+  SUSPENDED
   CANCELLED
+  EXPIRED
+}
+
+enum CustomerType {
+  INDIVIDUAL
+  BUSINESS
+}
+
+enum CustomerNotificationPreference {
+  EMAIL
+  WHATSAPP
 }
 
 enum RepairStatus {
@@ -77,6 +89,24 @@ enum InvoiceStatus {
   PARTIALLY_PAID
   PAID
   CANCELLED
+  VOID
+}
+
+enum InvoiceItemType {
+  INVENTORY
+  NON_INVENTORY
+  LABOUR
+  SERVICE
+  CUSTOM
+}
+
+enum KraEtimsStatus {
+  NOT_REQUIRED
+  PENDING
+  SUBMITTED
+  CONFIRMED
+  FAILED
+  CANCELLED_ADJUSTED
 }
 
 enum PaymentStatus {
@@ -95,8 +125,19 @@ enum PaymentMethod {
 
 enum NotificationChannel {
   EMAIL
+  WHATSAPP
   PUSH
   IN_APP
+}
+
+enum NotificationCategory {
+  CUSTOMER_ACCEPTED_REPAIR
+  CUSTOMER_DECLINED_REPAIR
+  REPAIR_COMPLETED
+  PAYMENT
+  INVENTORY
+  SUBSCRIPTION
+  SYSTEM
 }
 
 enum NotificationStatus {
@@ -106,50 +147,106 @@ enum NotificationStatus {
   READ
 }
 
+enum CustomerRepairDecision {
+  ACCEPTED
+  DECLINED
+}
+
+enum ExpenseCategory {
+  RENT
+  ELECTRICITY
+  WATER
+  INTERNET
+  TELEPHONE
+  GAS
+  SALARIES
+  TRANSPORT
+  MARKETING
+  SOFTWARE
+  EQUIPMENT
+  MAINTENANCE
+  BANKING_CHARGES
+  TAX_FEES
+  OTHER
+}
+
+enum ExpenseStatus {
+  ACTIVE
+  VOID
+}
+
+enum SubscriptionBillingCycle {
+  MONTHLY
+  ANNUAL
+}
+
+enum SubscriptionPaymentStatus {
+  PENDING
+  VERIFIED
+  FAILED
+  REFUNDED
+}
+
+enum GatewayEventStatus {
+  RECEIVED
+  PROCESSED
+  REJECTED
+}
+
 model Business {
-  id                    String                 @id @default(uuid()) @db.Uuid
-  name                  String
-  logoUrl               String?
-  registrationNumber    String?                @unique
-  taxPin                String?
-  email                 String
-  phone                 String
-  whatsapp              String?
-  address               String
-  city                  String
-  country               String                 @default("Kenya")
-  currency              String                 @default("KES")
-  taxRate               Decimal                @default(0) @db.Decimal(5, 2)
-  receiptFooter         String?
-  invoiceFooter         String?
-  workingHours          Json?
-  timeZone              String                 @default("Africa/Nairobi")
-  status                BusinessStatus         @default(ACTIVE)
-  subscriptionStatus    SubscriptionStatus     @default(TRIAL)
-  primaryAdminId        String?                @unique @db.Uuid
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
-  deletedAt             DateTime?
-  primaryAdmin          User?                  @relation("PrimaryBusinessAdmin", fields: [primaryAdminId], references: [id], onDelete: SetNull)
-  users                 User[]                 @relation("BusinessUsers")
-  customers             Customer[]
-  devices               Device[]
-  repairs               Repair[]
-  repairStatusHistory   RepairStatusHistory[]
-  repairNotes           RepairNote[]
-  repairAssignments     RepairAssignment[]
-  suppliers             Supplier[]
-  inventoryItems        InventoryItem[]
-  inventoryTransactions InventoryTransaction[]
-  repairParts           RepairPart[]
-  invoices              Invoice[]
-  invoiceItems          InvoiceItem[]
-  payments              Payment[]
-  receipts              Receipt[]
-  notifications         Notification[]
-  auditLogs             AuditLog[]
-  settings              Setting[]
-  sequences             SequenceCounter[]
+  id                        String                   @id @default(uuid()) @db.Uuid
+  name                      String
+  logoUrl                   String?
+  registrationNumber        String?                  @unique
+  taxPin                    String?
+  email                     String
+  phone                     String
+  whatsapp                  String?
+  address                   String
+  city                      String
+  country                   String                   @default("Kenya")
+  currency                  String                   @default("KES")
+  taxRate                   Decimal                  @default(0) @db.Decimal(5, 2)
+  defaultLabourCharge       Decimal                  @default(1500) @db.Decimal(12, 2)
+  allowInvoicePriceOverride Boolean                  @default(true)
+  receiptFooter             String?
+  invoiceFooter             String?
+  workingHours              Json?
+  timeZone                  String                   @default("Africa/Nairobi")
+  status                    BusinessStatus           @default(ACTIVE)
+  subscriptionStatus        SubscriptionStatus       @default(TRIAL)
+  primaryAdminId            String?                  @unique @db.Uuid
+  createdAt                 DateTime                 @default(now())
+  updatedAt                 DateTime                 @updatedAt
+  deletedAt                 DateTime?
+  primaryAdmin              User?                    @relation("PrimaryBusinessAdmin", fields: [primaryAdminId], references: [id], onDelete: SetNull)
+  users                     User[]                   @relation("BusinessUsers")
+  customers                 Customer[]
+  devices                   Device[]
+  repairs                   Repair[]
+  repairStatusHistory       RepairStatusHistory[]
+  repairNotes               RepairNote[]
+  repairAssignments         RepairAssignment[]
+  suppliers                 Supplier[]
+  inventoryItems            InventoryItem[]
+  inventoryTransactions     InventoryTransaction[]
+  repairParts               RepairPart[]
+  invoices                  Invoice[]
+  invoiceItems              InvoiceItem[]
+  payments                  Payment[]
+  receipts                  Receipt[]
+  notifications             Notification[]
+  auditLogs                 AuditLog[]
+  settings                  Setting[]
+  sequences                 SequenceCounter[]
+  expenses                  BusinessExpense[]
+  taxSettings               BusinessTaxSetting?
+  kraSubmissions            KraEtimsSubmission[]
+  subscription              BusinessSubscription?
+  subscriptionPayments      SubscriptionPayment[]
+  gatewayEvents             PaymentGatewayEvent[]
+  technicianProfiles        TechnicianProfile[]
+  customerResponses         CustomerRepairResponse[]
 
   @@index([status])
   @@map("businesses")
@@ -166,42 +263,46 @@ model Role {
 }
 
 model User {
-  id                      String                 @id @default(uuid()) @db.Uuid
-  businessId              String?                @db.Uuid
-  roleId                  String                 @db.Uuid
-  email                   String                 @unique
-  passwordHash            String?
-  fullName                String
-  phone                   String?
-  avatarUrl               String?
-  googleSubject           String?                @unique
-  emailVerifiedAt         DateTime?
-  status                  AccountStatus          @default(PENDING_VERIFICATION)
-  failedLoginCount        Int                    @default(0)
-  lockedUntil             DateTime?
-  lastLoginAt             DateTime?
-  createdAt               DateTime               @default(now())
-  updatedAt               DateTime               @updatedAt
-  deletedAt               DateTime?
-  business                Business?              @relation("BusinessUsers", fields: [businessId], references: [id], onDelete: Restrict)
-  primaryAdminOf          Business?              @relation("PrimaryBusinessAdmin")
-  role                    Role                   @relation(fields: [roleId], references: [id], onDelete: Restrict)
-  customerProfile         Customer?
-  assignedRepairs         Repair[]               @relation("AssignedTechnician")
-  repairNotes             RepairNote[]           @relation("RepairNoteAuthor")
-  assignmentsAsTechnician RepairAssignment[]     @relation("AssignmentTechnician")
-  assignmentsMade         RepairAssignment[]     @relation("AssignmentActor")
-  inventoryTransactions   InventoryTransaction[]
-  repairParts             RepairPart[]
-  payments                Payment[]
-  receipts                Receipt[]
-  notifications           Notification[]
-  auditLogs               AuditLog[]
-  sessions                Session[]
-  passwordResets          PasswordReset[]
-  emailVerifications      EmailVerification[]
-  completedSetup          SetupLock?
-  pushTokens              DevicePushToken[]
+  id                           String                 @id @default(uuid()) @db.Uuid
+  businessId                   String?                @db.Uuid
+  roleId                       String                 @db.Uuid
+  email                        String                 @unique
+  passwordHash                 String?
+  fullName                     String
+  phone                        String?
+  avatarUrl                    String?
+  googleSubject                String?                @unique
+  emailVerifiedAt              DateTime?
+  status                       AccountStatus          @default(PENDING_VERIFICATION)
+  failedLoginCount             Int                    @default(0)
+  lockedUntil                  DateTime?
+  lastLoginAt                  DateTime?
+  createdAt                    DateTime               @default(now())
+  updatedAt                    DateTime               @updatedAt
+  deletedAt                    DateTime?
+  canTakeRepairJobs            Boolean                @default(false)
+  business                     Business?              @relation("BusinessUsers", fields: [businessId], references: [id], onDelete: Restrict)
+  primaryAdminOf               Business?              @relation("PrimaryBusinessAdmin")
+  role                         Role                   @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  customerProfile              Customer?
+  assignedRepairs              Repair[]               @relation("AssignedTechnician")
+  repairNotes                  RepairNote[]           @relation("RepairNoteAuthor")
+  assignmentsAsTechnician      RepairAssignment[]     @relation("AssignmentTechnician")
+  assignmentsMade              RepairAssignment[]     @relation("AssignmentActor")
+  inventoryTransactions        InventoryTransaction[]
+  repairParts                  RepairPart[]
+  payments                     Payment[]
+  receipts                     Receipt[]
+  notifications                Notification[]
+  auditLogs                    AuditLog[]
+  sessions                     Session[]
+  passwordResets               PasswordReset[]
+  emailVerifications           EmailVerification[]
+  completedSetup               SetupLock?
+  pushTokens                   DevicePushToken[]
+  technicianProfile            TechnicianProfile?
+  expensesCreated              BusinessExpense[]
+  subscriptionPaymentsRecorded SubscriptionPayment[]  @relation("SubscriptionPaymentRecorder")
 
   @@index([businessId, roleId])
   @@index([status])
@@ -209,29 +310,35 @@ model User {
 }
 
 model Customer {
-  id               String        @id @default(uuid()) @db.Uuid
-  businessId       String        @db.Uuid
-  userId           String?       @unique @db.Uuid
-  fullName         String
-  email            String?
-  phone            String
-  alternativePhone String?
-  address          String?
-  notes            String?
-  status           AccountStatus @default(ACTIVE)
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
-  deletedAt        DateTime?
-  business         Business      @relation(fields: [businessId], references: [id], onDelete: Restrict)
-  user             User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
-  devices          Device[]
-  repairs          Repair[]
-  invoices         Invoice[]
-  payments         Payment[]
+  id                     String                         @id @default(uuid()) @db.Uuid
+  businessId             String                         @db.Uuid
+  userId                 String?                        @unique @db.Uuid
+  fullName               String
+  email                  String?
+  phone                  String
+  alternativePhone       String?
+  address                String?
+  notes                  String?
+  customerType           CustomerType                   @default(INDIVIDUAL)
+  whatsappPhone          String?
+  kraPin                 String?
+  preferredCommunication CustomerNotificationPreference @default(EMAIL)
+  status                 AccountStatus                  @default(ACTIVE)
+  createdAt              DateTime                       @default(now())
+  updatedAt              DateTime                       @updatedAt
+  deletedAt              DateTime?
+  business               Business                       @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  user                   User?                          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  devices                Device[]
+  repairs                Repair[]
+  invoices               Invoice[]
+  payments               Payment[]
+  responses              CustomerRepairResponse[]
 
   @@unique([businessId, phone])
   @@index([businessId, fullName])
   @@index([businessId, email])
+  @@index([businessId, kraPin])
   @@map("customers")
 }
 
@@ -267,39 +374,44 @@ model Device {
 }
 
 model Repair {
-  id                      String                @id @default(uuid()) @db.Uuid
-  businessId              String                @db.Uuid
-  customerId              String                @db.Uuid
-  deviceId                String                @db.Uuid
-  reference               String
-  publicTrackingTokenHash String                @unique
-  reportedIssue           String
-  diagnosis               String?
-  assignedTechnicianId    String?               @db.Uuid
-  estimatedCost           Decimal?              @db.Decimal(12, 2)
-  estimatedCompletionAt   DateTime?
-  priority                RepairPriority        @default(NORMAL)
-  status                  RepairStatus          @default(RECEIVED)
-  warrantyInformation     String?
-  internalNotes           String?
-  customerVisibleNotes    String?
-  acceptedAt              DateTime?
-  completedAt             DateTime?
-  collectedAt             DateTime?
-  createdAt               DateTime              @default(now())
-  updatedAt               DateTime              @updatedAt
-  deletedAt               DateTime?
-  business                Business              @relation(fields: [businessId], references: [id], onDelete: Restrict)
-  customer                Customer              @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  device                  Device                @relation(fields: [deviceId], references: [id], onDelete: Restrict)
-  assignedTechnician      User?                 @relation("AssignedTechnician", fields: [assignedTechnicianId], references: [id], onDelete: SetNull)
-  statusHistory           RepairStatusHistory[]
-  notes                   RepairNote[]
-  assignments             RepairAssignment[]
-  parts                   RepairPart[]
-  invoices                Invoice[]
-  receipts                Receipt[]
-  notifications           Notification[]
+  id                             String                          @id @default(uuid()) @db.Uuid
+  businessId                     String                          @db.Uuid
+  customerId                     String                          @db.Uuid
+  deviceId                       String                          @db.Uuid
+  reference                      String
+  publicTrackingTokenHash        String                          @unique
+  publicTrackingTokenEncrypted   String?
+  reportedIssue                  String
+  diagnosis                      String?
+  assignedTechnicianId           String?                         @db.Uuid
+  estimatedCost                  Decimal?                        @db.Decimal(12, 2)
+  estimatedCompletionAt          DateTime?
+  priority                       RepairPriority                  @default(NORMAL)
+  status                         RepairStatus                    @default(RECEIVED)
+  warrantyInformation            String?
+  internalNotes                  String?
+  customerVisibleNotes           String?
+  notificationPreferenceOverride CustomerNotificationPreference?
+  approvalVersion                Int                             @default(0)
+  acceptedAt                     DateTime?
+  completedAt                    DateTime?
+  collectedAt                    DateTime?
+  createdAt                      DateTime                        @default(now())
+  updatedAt                      DateTime                        @updatedAt
+  deletedAt                      DateTime?
+  business                       Business                        @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  customer                       Customer                        @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  device                         Device                          @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  assignedTechnician             User?                           @relation("AssignedTechnician", fields: [assignedTechnicianId], references: [id], onDelete: SetNull)
+  statusHistory                  RepairStatusHistory[]
+  notes                          RepairNote[]
+  assignments                    RepairAssignment[]
+  parts                          RepairPart[]
+  invoices                       Invoice[]
+  receipts                       Receipt[]
+  notifications                  Notification[]
+  invoiceItems                   InvoiceItem[]
+  customerResponses              CustomerRepairResponse[]
 
   @@unique([businessId, reference])
   @@index([businessId, status])
@@ -398,6 +510,7 @@ model InventoryItem {
   supplier     Supplier?              @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   transactions InventoryTransaction[]
   repairParts  RepairPart[]
+  invoiceItems InvoiceItem[]
 
   @@unique([businessId, sku])
   @@unique([businessId, barcode])
@@ -444,31 +557,38 @@ model RepairPart {
 }
 
 model Invoice {
-  id             String        @id @default(uuid()) @db.Uuid
-  businessId     String        @db.Uuid
-  customerId     String        @db.Uuid
-  repairId       String?       @db.Uuid
-  number         String
-  issuedAt       DateTime?
-  dueAt          DateTime?
-  status         InvoiceStatus @default(DRAFT)
-  subtotal       Decimal       @default(0) @db.Decimal(12, 2)
-  taxAmount      Decimal       @default(0) @db.Decimal(12, 2)
-  discountAmount Decimal       @default(0) @db.Decimal(12, 2)
-  total          Decimal       @default(0) @db.Decimal(12, 2)
-  amountPaid     Decimal       @default(0) @db.Decimal(12, 2)
-  balance        Decimal       @default(0) @db.Decimal(12, 2)
-  paymentStatus  PaymentStatus @default(UNPAID)
-  terms          String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  deletedAt      DateTime?
-  business       Business      @relation(fields: [businessId], references: [id], onDelete: Restrict)
-  customer       Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  repair         Repair?       @relation(fields: [repairId], references: [id], onDelete: SetNull)
-  items          InvoiceItem[]
-  payments       Payment[]
-  receipts       Receipt[]
+  id                   String               @id @default(uuid()) @db.Uuid
+  businessId           String               @db.Uuid
+  customerId           String               @db.Uuid
+  repairId             String?              @db.Uuid
+  number               String
+  issuedAt             DateTime?
+  dueAt                DateTime?
+  status               InvoiceStatus        @default(DRAFT)
+  subtotal             Decimal              @default(0) @db.Decimal(12, 2)
+  taxAmount            Decimal              @default(0) @db.Decimal(12, 2)
+  discountAmount       Decimal              @default(0) @db.Decimal(12, 2)
+  invoiceLevelDiscount Decimal              @default(0) @db.Decimal(12, 2)
+  total                Decimal              @default(0) @db.Decimal(12, 2)
+  amountPaid           Decimal              @default(0) @db.Decimal(12, 2)
+  balance              Decimal              @default(0) @db.Decimal(12, 2)
+  paymentStatus        PaymentStatus        @default(UNPAID)
+  terms                String?
+  notes                String?
+  kraStatus            KraEtimsStatus       @default(NOT_REQUIRED)
+  kraReference         String?
+  voidedAt             DateTime?
+  voidReason           String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  deletedAt            DateTime?
+  business             Business             @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  customer             Customer             @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  repair               Repair?              @relation(fields: [repairId], references: [id], onDelete: SetNull)
+  items                InvoiceItem[]
+  payments             Payment[]
+  receipts             Receipt[]
+  kraSubmissions       KraEtimsSubmission[]
 
   @@unique([businessId, number])
   @@index([businessId, status, createdAt])
@@ -477,22 +597,31 @@ model Invoice {
 }
 
 model InvoiceItem {
-  id          String   @id @default(uuid()) @db.Uuid
-  businessId  String   @db.Uuid
-  invoiceId   String   @db.Uuid
-  description String
-  quantity    Decimal  @db.Decimal(10, 2)
-  unitPrice   Decimal  @db.Decimal(12, 2)
-  taxRate     Decimal  @default(0) @db.Decimal(5, 2)
-  discount    Decimal  @default(0) @db.Decimal(12, 2)
-  lineTotal   Decimal  @db.Decimal(12, 2)
-  sourceType  String?
-  sourceId    String?
-  createdAt   DateTime @default(now())
-  business    Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
-  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  id                 String          @id @default(uuid()) @db.Uuid
+  businessId         String          @db.Uuid
+  invoiceId          String          @db.Uuid
+  description        String
+  quantity           Decimal         @db.Decimal(10, 2)
+  unitPrice          Decimal         @db.Decimal(12, 2)
+  taxRate            Decimal         @default(0) @db.Decimal(5, 2)
+  discount           Decimal         @default(0) @db.Decimal(12, 2)
+  lineTotal          Decimal         @db.Decimal(12, 2)
+  sourceType         String?
+  sourceId           String?
+  itemType           InvoiceItemType @default(CUSTOM)
+  inventoryItemId    String?         @db.Uuid
+  repairId           String?         @db.Uuid
+  historicalUnitCost Decimal?        @db.Decimal(12, 2)
+  stockDeductedAt    DateTime?
+  createdAt          DateTime        @default(now())
+  business           Business        @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  invoice            Invoice         @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  inventoryItem      InventoryItem?  @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+  repair             Repair?         @relation(fields: [repairId], references: [id], onDelete: SetNull)
 
   @@index([businessId, invoiceId])
+  @@index([businessId, inventoryItemId])
+  @@index([businessId, repairId])
   @@map("invoice_items")
 }
 
@@ -544,24 +673,26 @@ model Receipt {
 }
 
 model Notification {
-  id            String              @id @default(uuid()) @db.Uuid
-  businessId    String              @db.Uuid
-  userId        String?             @db.Uuid
-  repairId      String?             @db.Uuid
+  id            String               @id @default(uuid()) @db.Uuid
+  businessId    String               @db.Uuid
+  userId        String?              @db.Uuid
+  repairId      String?              @db.Uuid
   channel       NotificationChannel
-  status        NotificationStatus  @default(PENDING)
+  status        NotificationStatus   @default(PENDING)
   template      String
+  category      NotificationCategory @default(SYSTEM)
   recipient     String
   subject       String?
   body          String
   providerId    String?
   failureReason String?
+  metadata      Json?
   sentAt        DateTime?
   readAt        DateTime?
-  createdAt     DateTime            @default(now())
-  business      Business            @relation(fields: [businessId], references: [id], onDelete: Restrict)
-  user          User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
-  repair        Repair?             @relation(fields: [repairId], references: [id], onDelete: SetNull)
+  createdAt     DateTime             @default(now())
+  business      Business             @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  user          User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
+  repair        Repair?              @relation(fields: [repairId], references: [id], onDelete: SetNull)
 
   @@index([businessId, status, createdAt])
   @@index([userId, readAt])
@@ -682,4 +813,188 @@ model DevicePushToken {
 
   @@index([userId, revokedAt])
   @@map("device_push_tokens")
+}
+
+model CustomerRepairResponse {
+  id                      String                 @id @default(uuid()) @db.Uuid
+  businessId              String                 @db.Uuid
+  repairId                String                 @db.Uuid
+  customerId              String                 @db.Uuid
+  decision                CustomerRepairDecision
+  approvalVersion         Int
+  estimateAmountPresented Decimal?               @db.Decimal(12, 2)
+  declineReason           String?
+  ipAddress               String?
+  userAgent               String?
+  createdAt               DateTime               @default(now())
+  business                Business               @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  repair                  Repair                 @relation(fields: [repairId], references: [id], onDelete: Restrict)
+  customer                Customer               @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  @@unique([repairId, approvalVersion])
+  @@index([businessId, createdAt])
+  @@map("customer_repair_responses")
+}
+
+model BusinessExpense {
+  id            String          @id @default(uuid()) @db.Uuid
+  businessId    String          @db.Uuid
+  category      ExpenseCategory
+  description   String
+  supplier      String?
+  amount        Decimal         @db.Decimal(12, 2)
+  expenseDate   DateTime
+  reference     String?
+  notes         String?
+  attachmentUrl String?
+  recurring     Boolean         @default(false)
+  status        ExpenseStatus   @default(ACTIVE)
+  voidReason    String?
+  createdById   String          @db.Uuid
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  business      Business        @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  createdBy     User            @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([businessId, expenseDate])
+  @@index([businessId, category, expenseDate])
+  @@map("business_expenses")
+}
+
+model TechnicianProfile {
+  id         String   @id @default(uuid()) @db.Uuid
+  businessId String   @db.Uuid
+  userId     String   @unique @db.Uuid
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([businessId, active])
+  @@map("technician_profiles")
+}
+
+model BusinessTaxSetting {
+  id                    String   @id @default(uuid()) @db.Uuid
+  businessId            String   @unique @db.Uuid
+  etimsEnabled          Boolean  @default(false)
+  environment           String   @default("sandbox")
+  branchCode            String?
+  deviceIdentifier      String?
+  requireCustomerKraPin Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  business              Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@map("business_tax_settings")
+}
+
+model KraEtimsSubmission {
+  id                String         @id @default(uuid()) @db.Uuid
+  businessId        String         @db.Uuid
+  invoiceId         String         @db.Uuid
+  status            KraEtimsStatus @default(PENDING)
+  attempt           Int            @default(1)
+  officialReference String?
+  requestPayload    Json
+  responsePayload   Json?
+  failureReason     String?
+  submittedAt       DateTime?
+  confirmedAt       DateTime?
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  business          Business       @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  invoice           Invoice        @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@index([businessId, status, createdAt])
+  @@index([invoiceId, attempt])
+  @@map("kra_etims_submissions")
+}
+
+model SubscriptionPlan {
+  id                String                 @id @default(uuid()) @db.Uuid
+  name              String                 @unique
+  monthlyPrice      Decimal                @db.Decimal(12, 2)
+  annualPrice       Decimal                @db.Decimal(12, 2)
+  currency          String                 @default("KES")
+  trialDays         Int                    @default(0)
+  repairLimit       Int?
+  technicianLimit   Int?
+  businessUserLimit Int?
+  storageMb         Int?
+  features          Json
+  active            Boolean                @default(true)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  subscriptions     BusinessSubscription[]
+
+  @@index([active])
+  @@map("subscription_plans")
+}
+
+model BusinessSubscription {
+  id                           String                   @id @default(uuid()) @db.Uuid
+  businessId                   String                   @unique @db.Uuid
+  planId                       String                   @db.Uuid
+  status                       SubscriptionStatus       @default(TRIAL)
+  billingCycle                 SubscriptionBillingCycle @default(MONTHLY)
+  startDate                    DateTime                 @default(now())
+  trialEnd                     DateTime?
+  currentPeriodStart           DateTime?
+  currentPeriodEnd             DateTime?
+  renewalDate                  DateTime?
+  cancelledDate                DateTime?
+  gracePeriodEndsAt            DateTime?
+  gatewayCustomerReference     String?
+  gatewaySubscriptionReference String?
+  createdAt                    DateTime                 @default(now())
+  updatedAt                    DateTime                 @updatedAt
+  business                     Business                 @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  plan                         SubscriptionPlan         @relation(fields: [planId], references: [id], onDelete: Restrict)
+  payments                     SubscriptionPayment[]
+
+  @@index([status, currentPeriodEnd])
+  @@map("business_subscriptions")
+}
+
+model SubscriptionPayment {
+  id                    String                    @id @default(uuid()) @db.Uuid
+  businessId            String                    @db.Uuid
+  subscriptionId        String                    @db.Uuid
+  recordedById          String?                   @db.Uuid
+  provider              String
+  providerTransactionId String
+  idempotencyKey        String                    @unique
+  amount                Decimal                   @db.Decimal(12, 2)
+  currency              String
+  status                SubscriptionPaymentStatus @default(PENDING)
+  paidAt                DateTime?
+  failureReason         String?
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+  business              Business                  @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  subscription          BusinessSubscription      @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  recordedBy            User?                     @relation("SubscriptionPaymentRecorder", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@unique([provider, providerTransactionId])
+  @@index([businessId, status, createdAt])
+  @@map("subscription_payments")
+}
+
+model PaymentGatewayEvent {
+  id              String             @id @default(uuid()) @db.Uuid
+  businessId      String?            @db.Uuid
+  provider        String
+  providerEventId String
+  status          GatewayEventStatus @default(RECEIVED)
+  payload         Json
+  failureReason   String?
+  processedAt     DateTime?
+  createdAt       DateTime           @default(now())
+  business        Business?          @relation(fields: [businessId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, providerEventId])
+  @@index([status, createdAt])
+  @@map("payment_gateway_events")
 }

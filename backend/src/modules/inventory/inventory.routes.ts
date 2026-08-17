@@ -8,6 +8,7 @@ import { authenticate } from "../../middleware/authenticate.js";
 import { authorize, requireBusiness } from "../../middleware/authorize.js";
 import { routeParam, validate } from "../../middleware/validate.js";
 import { ensureDraftInvoice, recalculateInvoice } from "../invoices/invoice.service.js";
+import { calculateInvoice } from "../invoices/invoice-calculation.js";
 
 const router = Router();
 router.use(authenticate);
@@ -90,8 +91,8 @@ router.post("/repairs/:repairId/parts", authorize(RoleCode.BUSINESS_ADMIN, RoleC
     const part = await tx.repairPart.create({ data: { businessId, repairId: repair.id, inventoryItemId: item.id, technicianId: request.auth!.userId, quantity: request.body.quantity, unitPrice: item.sellingPrice } });
     const invoiceId = await ensureDraftInvoice(tx, businessId, repair.customerId, repair.id);
     const business = await tx.business.findUniqueOrThrow({ where: { id: businessId }, select: { taxRate: true } });
-    const lineTotal = Number(item.sellingPrice) * request.body.quantity * (1 + Number(business.taxRate) / 100);
-    await tx.invoiceItem.create({ data: { businessId, invoiceId, description: `${item.name} (${item.sku})`, quantity: request.body.quantity, unitPrice: item.sellingPrice, taxRate: business.taxRate, lineTotal, sourceType: "repair_part", sourceId: part.id } });
+    const lineTotal = calculateInvoice([{ quantity: request.body.quantity, unitPrice: Number(item.sellingPrice), taxRate: Number(business.taxRate) }]).lines[0]!.lineTotal;
+    await tx.invoiceItem.create({ data: { businessId, invoiceId, repairId: repair.id, description: `${item.name} (${item.sku})`, quantity: request.body.quantity, unitPrice: item.sellingPrice, taxRate: business.taxRate, lineTotal, itemType: "INVENTORY", inventoryItemId: item.id, historicalUnitCost: item.purchaseCost, stockDeductedAt: new Date(), sourceType: "repair_part", sourceId: part.id } });
     await recalculateInvoice(tx, invoiceId);
     await writeAudit(tx, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "REPAIR_PART_ADDED", resourceType: "repair_part", resourceId: part.id, metadata: { repairId: repair.id, itemId: item.id, quantity: request.body.quantity, negativeStockOverride: quantityAfter < 0 } });
     return { part, stockTransaction, invoiceId };

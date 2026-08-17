@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { NotificationCategory } from "../../generated/prisma/index.js";
 import { z } from "zod";
 import { notFound } from "../../errors/app-error.js";
 import { prisma } from "../../lib/prisma.js";
@@ -9,8 +10,20 @@ const router = Router();
 router.use(authenticate);
 
 router.get("/", async (request, response) => {
-  const notifications = await prisma.notification.findMany({ where: { userId: request.auth!.userId }, orderBy: { createdAt: "desc" }, take: 100 });
-  response.json({ success: true, data: notifications });
+  const category = typeof request.query.category === "string" && Object.values(NotificationCategory).includes(request.query.category as NotificationCategory) ? request.query.category as NotificationCategory : undefined;
+  const unread = request.query.unread === "true";
+  const notifications = await prisma.notification.findMany({ where: { userId: request.auth!.userId, ...(category ? { category } : {}), ...(unread ? { readAt: null } : {}) }, include: { repair: { select: { id: true, reference: true, customer: { select: { id: true, fullName: true } } } } }, orderBy: { createdAt: "desc" }, take: 100 });
+  response.json({ success: true, data: notifications.map((notification) => ({ ...notification, title: notification.subject ?? notification.category.replaceAll("_", " "), customer: notification.repair?.customer })) });
+});
+
+router.get("/unread-count", async (request, response) => {
+  const count = await prisma.notification.count({ where: { userId: request.auth!.userId, readAt: null } });
+  response.json({ success: true, data: { count } });
+});
+
+router.patch("/read-all", async (request, response) => {
+  const updated = await prisma.notification.updateMany({ where: { userId: request.auth!.userId, readAt: null }, data: { readAt: new Date() } });
+  response.json({ success: true, data: { updated: updated.count } });
 });
 
 router.patch("/:id/read", async (request, response) => {
@@ -31,4 +44,3 @@ router.delete("/devices", validate(z.object({ token: z.string().min(20).max(4096
 });
 
 export { router as notificationRouter };
-

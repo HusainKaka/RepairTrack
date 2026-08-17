@@ -53,4 +53,13 @@ router.patch("/:id", authorize(RoleCode.BUSINESS_ADMIN), validate(schema.partial
   response.json({ success: true, data: device });
 });
 
+router.delete("/:id", authorize(RoleCode.BUSINESS_ADMIN), validate(z.object({ reason: z.string().trim().min(3).max(500) })), async (request, response) => {
+  const businessId = requireBusiness(request);
+  const existing = await prisma.device.findFirst({ where: { id: routeParam(request.params.id), businessId, deletedAt: null }, include: { _count: { select: { repairs: true } } } });
+  if (!existing) throw notFound("Device");
+  await prisma.device.update({ where: { id: existing.id }, data: { deletedAt: new Date() } });
+  await writeAudit(prisma, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "DEVICE_DEACTIVATED", resourceType: "device", resourceId: existing.id, metadata: { reason: request.body.reason, linkedRepairs: existing._count.repairs } });
+  response.json({ success: true, data: { id: existing.id, action: "DEACTIVATED", linkedRepairsPreserved: existing._count.repairs } });
+});
+
 export { router as deviceRouter };

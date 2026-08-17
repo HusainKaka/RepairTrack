@@ -27,7 +27,19 @@ const envSchema = z.object({
   MPESA_CONSUMER_KEY: z.string().optional(),
   MPESA_CONSUMER_SECRET: z.string().optional(),
   MPESA_SHORTCODE: z.string().optional(),
-  MPESA_PASSKEY: z.string().optional()
+  MPESA_PASSKEY: z.string().optional(),
+  WHATSAPP_API_VERSION: z.string().optional(),
+  WHATSAPP_ACCESS_TOKEN: z.string().optional(),
+  WHATSAPP_PHONE_NUMBER_ID: z.string().optional(),
+  WHATSAPP_BUSINESS_ACCOUNT_ID: z.string().optional(),
+  WHATSAPP_WEBHOOK_SECRET: z.string().optional(),
+  KRA_ETIMS_ENVIRONMENT: z.enum(["sandbox", "production"]).default("sandbox"),
+  KRA_ETIMS_BASE_URL: z.string().url().optional(),
+  KRA_ETIMS_CLIENT_ID: z.string().optional(),
+  KRA_ETIMS_CLIENT_SECRET: z.string().optional(),
+  KRA_ETIMS_SUBMIT_PATH: z.string().default("/invoices"),
+  PAYMENT_GATEWAY_PROVIDER: z.string().default("MPESA"),
+  PAYMENT_GATEWAY_WEBHOOK_SECRET: z.string().min(32).optional()
 });
 
 const parsed = envSchema.safeParse(process.env);
