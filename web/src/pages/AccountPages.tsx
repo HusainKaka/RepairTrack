@@ -3,7 +3,22 @@ import DeleteForever from "@mui/icons-material/DeleteForever";
 import Edit from "@mui/icons-material/Edit";
 import MarkEmailRead from "@mui/icons-material/MarkEmailRead";
 import Search from "@mui/icons-material/Search";
-import { Alert, Avatar, Box, Button, Card, CardContent, Chip, Divider, Grid, Paper, Stack, TextField, Typography } from "@mui/material";
+import {
+  Alert,
+  Avatar,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Chip,
+  Divider,
+  Grid,
+  MenuItem,
+  Paper,
+  Stack,
+  TextField,
+  Typography,
+} from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -14,54 +29,1051 @@ import { DataTable, FormDialog, KeyValue } from "../components/DataViews";
 import { EmptyState, ErrorBlock, LoadingBlock } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { StatusChip } from "../components/StatusChip";
-import type { ApiEnvelope, AuditLog, Customer, Device, Invoice, Notification, Repair } from "../types";
+import type {
+  ApiEnvelope,
+  AuditLog,
+  Customer,
+  Device,
+  Invoice,
+  Notification,
+  Repair,
+} from "../types";
 
 export function NotificationsPage() {
-  const queryClient = useQueryClient(); const query = useQuery({ queryKey: ["notifications"], queryFn: async () => (await api.get<ApiEnvelope<Notification[]>>("/notifications")).data.data }); const read = useMutation({ mutationFn: (id: string) => api.patch(`/notifications/${id}/read`), onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }) });
-  if (query.isLoading) return <LoadingBlock />; if (query.error) return <ErrorBlock message={apiMessage(query.error)} />;
-  return <><PageHeader title="Notifications" description="Repair updates and account events delivered to this user." />{query.data?.length ? <Stack spacing={1.5}>{query.data.map((item) => <Paper variant="outlined" key={item.id} sx={{ p: 2.5, opacity: item.readAt ? .68 : 1 }}><Stack direction={{ xs: "column", sm: "row" }} gap={2} alignItems={{ sm: "center" }}><Box flex={1}><Stack direction="row" gap={1} alignItems="center"><Typography fontWeight={800}>{item.title}</Typography>{!item.readAt && <Chip size="small" label="New" color="primary" />}</Stack><Typography color="text.secondary" mt={.5}>{item.body}</Typography><Typography variant="caption" color="text.secondary">{new Date(item.createdAt).toLocaleString()} · {item.channel}</Typography></Box>{!item.readAt && <Button startIcon={<MarkEmailRead />} onClick={() => read.mutate(item.id)}>Mark read</Button>}</Stack></Paper>)}</Stack> : <EmptyState title="You are all caught up" description="New repair and billing updates will appear here." />}</>;
+  const queryClient = useQueryClient();
+  const [category, setCategory] = useState("");
+  const [unreadOnly, setUnreadOnly] = useState(false);
+  const query = useQuery({
+    queryKey: ["notifications", category, unreadOnly],
+    queryFn: async () =>
+      (
+        await api.get<ApiEnvelope<Notification[]>>("/notifications", {
+          params: { category: category || undefined, unread: unreadOnly || undefined },
+        })
+      ).data.data,
+  });
+  const read = useMutation({
+    mutationFn: (id: string) => api.patch(`/notifications/${id}/read`),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      await queryClient.invalidateQueries({ queryKey: ["notification-unread-count"] });
+    },
+  });
+  const readAll = useMutation({
+    mutationFn: () => api.patch("/notifications/read-all"),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["notifications"] });
+      await queryClient.invalidateQueries({ queryKey: ["notification-unread-count"] });
+    },
+  });
+  if (query.isLoading) return <LoadingBlock />;
+  if (query.error) return <ErrorBlock message={apiMessage(query.error)} />;
+  return (
+    <>
+      <PageHeader
+        title="Notifications"
+        description="Repair updates and account events delivered to this user."
+        actions={<Button startIcon={<MarkEmailRead />} onClick={() => readAll.mutate()} disabled={readAll.isPending}>Mark all read</Button>}
+      />
+      <Paper sx={{ p: 2, mb: 2 }}>
+        <Stack direction={{ xs: "column", sm: "row" }} gap={2}>
+          <TextField select label="Category" value={category} onChange={(event) => setCategory(event.target.value)} sx={{ minWidth: 220 }}>
+            <MenuItem value="">All categories</MenuItem>
+            {["REPAIR", "INVOICE", "PAYMENT", "SUBSCRIPTION", "SYSTEM", "CUSTOMER_RESPONSE"].map((value) => <MenuItem key={value} value={value}>{value.replaceAll("_", " ")}</MenuItem>)}
+          </TextField>
+          <Button variant={unreadOnly ? "contained" : "outlined"} onClick={() => setUnreadOnly((value) => !value)}>{unreadOnly ? "Unread only" : "Show unread only"}</Button>
+        </Stack>
+      </Paper>
+      {query.data?.length ? (
+        <Stack spacing={1.5}>
+          {query.data.map((item) => (
+            <Paper
+              variant="outlined"
+              key={item.id}
+              sx={{ p: 2.5, opacity: item.readAt ? 0.68 : 1 }}
+            >
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                gap={2}
+                alignItems={{ sm: "center" }}
+              >
+                <Box flex={1}>
+                  <Stack direction="row" gap={1} alignItems="center">
+                    <Typography fontWeight={800}>{item.title}</Typography>
+                    {item.category && <Chip size="small" label={item.category.replaceAll("_", " ")} variant="outlined" />}
+                    {!item.readAt && (
+                      <Chip size="small" label="New" color="primary" />
+                    )}
+                  </Stack>
+                  <Typography color="text.secondary" mt={0.5}>
+                    {item.body}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {new Date(item.createdAt).toLocaleString()} · {item.channel}
+                    {item.repair ? ` · ${item.repair.reference}` : ""}
+                  </Typography>
+                </Box>
+                {!item.readAt && (
+                  <Button
+                    startIcon={<MarkEmailRead />}
+                    onClick={() => read.mutate(item.id)}
+                  >
+                    Mark read
+                  </Button>
+                )}
+              </Stack>
+            </Paper>
+          ))}
+        </Stack>
+      ) : (
+        <EmptyState
+          title="You are all caught up"
+          description="New repair and billing updates will appear here."
+        />
+      )}
+    </>
+  );
 }
 
 export function AuditPage() {
-  const query = useQuery({ queryKey: ["audit"], queryFn: async () => (await api.get<ApiEnvelope<AuditLog[]>>("/businesses/audit")).data.data }); if (query.isLoading) return <LoadingBlock />; if (query.error) return <ErrorBlock message={apiMessage(query.error)} />;
-  const rows = (query.data ?? []).map((log) => [new Date(log.createdAt).toLocaleString(), <Stack><Typography fontWeight={700}>{log.user?.fullName ?? "System"}</Typography><Typography variant="caption">{log.user?.email}</Typography></Stack>, log.action.replaceAll("_", " "), log.resourceType, log.resourceId ?? "—", log.ipAddress ?? "—"]);
-  return <><PageHeader title="Audit trail" description="Append-only security and operational events for accountability." /><DataTable columns={["Time", "Actor", "Action", "Resource", "Resource ID", "IP address"]} rows={rows} /></>;
+  const query = useQuery({
+    queryKey: ["audit"],
+    queryFn: async () =>
+      (await api.get<ApiEnvelope<AuditLog[]>>("/businesses/audit")).data.data,
+  });
+  if (query.isLoading) return <LoadingBlock />;
+  if (query.error) return <ErrorBlock message={apiMessage(query.error)} />;
+  const rows = (query.data ?? []).map((log) => [
+    new Date(log.createdAt).toLocaleString(),
+    <Stack>
+      <Typography fontWeight={700}>{log.user?.fullName ?? "System"}</Typography>
+      <Typography variant="caption">{log.user?.email}</Typography>
+    </Stack>,
+    log.action.replaceAll("_", " "),
+    log.resourceType,
+    log.resourceId ?? "—",
+    log.ipAddress ?? "—",
+  ]);
+  return (
+    <>
+      <PageHeader
+        title="Audit trail"
+        description="Append-only security and operational events for accountability."
+      />
+      <DataTable
+        columns={[
+          "Time",
+          "Actor",
+          "Action",
+          "Resource",
+          "Resource ID",
+          "IP address",
+        ]}
+        rows={rows}
+      />
+    </>
+  );
 }
 
-interface BusinessProfile { name: string; email: string; phone: string; whatsapp?: string; address: string; city: string; country: string; currency: string; taxRate: string; receiptFooter?: string; invoiceFooter?: string; timeZone: string }
-interface Setting { id: string; key: string; value: unknown }
+interface BusinessProfile {
+  name: string;
+  logoUrl?: string;
+  email: string;
+  phone: string;
+  whatsapp?: string;
+  address: string;
+  city: string;
+  country: string;
+  currency: string;
+  taxRate: string;
+  taxPin?: string;
+  defaultLabourCharge: string;
+  allowInvoicePriceOverride: boolean;
+  receiptFooter?: string;
+  invoiceFooter?: string;
+  timeZone: string;
+}
+interface Setting {
+  id: string;
+  key: string;
+  value: unknown;
+}
+interface TaxSetting { etimsEnabled: boolean; environment: "sandbox" | "production"; branchCode?: string; deviceIdentifier?: string; requireCustomerKraPin: boolean }
+interface IntegrationStatus { email: boolean; whatsapp: boolean; kraEtims: boolean; subscriptionGateway: boolean; google: boolean }
 export function SettingsPage() {
-  const { user } = useAuth(); const queryClient = useQueryClient(); const [key, setKey] = useState("notifications.email.enabled"); const [value, setValue] = useState("true"); const [profile, setProfile] = useState<BusinessProfile | null>(null); const [notice, setNotice] = useState("");
-  const settings = useQuery({ queryKey: ["settings"], queryFn: async () => (await api.get<ApiEnvelope<Setting[]>>("/settings")).data.data });
-  const business = useQuery({ queryKey: ["business-profile"], queryFn: async () => (await api.get<ApiEnvelope<BusinessProfile>>("/businesses/profile")).data.data, enabled: user?.role === "BUSINESS_ADMIN" });
-  useEffect(() => { if (business.data) setProfile(business.data); }, [business.data]);
-  const saveSetting = useMutation({ mutationFn: () => { let parsed: unknown; try { parsed = JSON.parse(value); } catch { parsed = value; } return api.put(`/settings/${encodeURIComponent(key)}`, { value: parsed }); }, onSuccess: async () => { setNotice("Setting saved and recorded in the audit trail."); await queryClient.invalidateQueries({ queryKey: ["settings"] }); } });
-  const saveProfile = useMutation({ mutationFn: () => api.patch("/businesses/profile", profile ? { ...profile, taxRate: Number(profile.taxRate), invoiceFooter: profile.invoiceFooter || undefined, receiptFooter: profile.receiptFooter || undefined } : {}), onSuccess: async () => { setNotice("Business profile updated."); await queryClient.invalidateQueries({ queryKey: ["business-profile"] }); } });
-  if (settings.isLoading || business.isLoading) return <LoadingBlock />; const issue = settings.error ?? business.error; if (issue) return <ErrorBlock message={apiMessage(issue)} />;
-  return <><PageHeader title="Settings" description="Business identity, document defaults, and scoped configuration." />{notice && <Alert severity="success" onClose={() => setNotice("")} sx={{ mb: 2 }}>{notice}</Alert>}<Grid container spacing={3}>{profile && <Grid size={{ xs: 12, lg: 7 }}><Card><CardContent><Typography variant="h6">Business profile</Typography><Typography variant="body2" color="text.secondary" mb={3}>Displayed on invoices, receipts, and customer notifications.</Typography><Stack spacing={2}><TextField label="Business name" value={profile.name} onChange={(event) => setProfile({ ...profile, name: event.target.value })} /><Stack direction={{ xs: "column", sm: "row" }} spacing={2}><TextField fullWidth type="email" label="Email" value={profile.email} onChange={(event) => setProfile({ ...profile, email: event.target.value })} /><TextField fullWidth label="Phone" value={profile.phone} onChange={(event) => setProfile({ ...profile, phone: event.target.value })} /></Stack><TextField label="Address" value={profile.address} onChange={(event) => setProfile({ ...profile, address: event.target.value })} /><Stack direction={{ xs: "column", sm: "row" }} spacing={2}><TextField fullWidth label="City" value={profile.city} onChange={(event) => setProfile({ ...profile, city: event.target.value })} /><TextField fullWidth label="Country" value={profile.country} onChange={(event) => setProfile({ ...profile, country: event.target.value })} /></Stack><Stack direction={{ xs: "column", sm: "row" }} spacing={2}><TextField fullWidth label="Currency" value={profile.currency} onChange={(event) => setProfile({ ...profile, currency: event.target.value })} /><TextField fullWidth type="number" label="Default tax rate (%)" value={profile.taxRate} onChange={(event) => setProfile({ ...profile, taxRate: event.target.value })} /></Stack><TextField multiline minRows={2} label="Invoice footer" value={profile.invoiceFooter ?? ""} onChange={(event) => setProfile({ ...profile, invoiceFooter: event.target.value })} /><TextField multiline minRows={2} label="Receipt footer" value={profile.receiptFooter ?? ""} onChange={(event) => setProfile({ ...profile, receiptFooter: event.target.value })} /><Button variant="contained" onClick={() => saveProfile.mutate()} disabled={saveProfile.isPending}>Save profile</Button></Stack></CardContent></Card></Grid>}<Grid size={{ xs: 12, lg: profile ? 5 : 12 }}><Card><CardContent><Typography variant="h6">Configuration registry</Typography><Typography variant="body2" color="text.secondary" mb={3}>Structured values support future integrations without hard-coded secrets.</Typography><Stack spacing={2}><TextField label="Setting key" value={key} onChange={(event) => setKey(event.target.value)} /><TextField multiline minRows={2} label="JSON or text value" value={value} onChange={(event) => setValue(event.target.value)} /><Button variant="outlined" onClick={() => saveSetting.mutate()} disabled={saveSetting.isPending}>Save setting</Button><Divider />{(settings.data ?? []).map((setting) => <Box key={setting.id}><Typography fontWeight={750}>{setting.key}</Typography><Typography component="pre" variant="caption" sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{JSON.stringify(setting.value, null, 2)}</Typography></Box>)}</Stack></CardContent></Card></Grid></Grid></>;
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const [key, setKey] = useState("notifications.email.enabled");
+  const [value, setValue] = useState("true");
+  const [profile, setProfile] = useState<BusinessProfile | null>(null);
+  const [notice, setNotice] = useState("");
+  const [tax, setTax] = useState<TaxSetting | null>(null);
+  const settings = useQuery({
+    queryKey: ["settings"],
+    queryFn: async () =>
+      (await api.get<ApiEnvelope<Setting[]>>("/settings")).data.data,
+  });
+  const business = useQuery({
+    queryKey: ["business-profile"],
+    queryFn: async () =>
+      (await api.get<ApiEnvelope<BusinessProfile>>("/businesses/profile")).data
+        .data,
+    enabled: user?.role === "BUSINESS_ADMIN",
+  });
+  const taxQuery = useQuery({ queryKey: ["tax-settings"], queryFn: async () => (await api.get<ApiEnvelope<TaxSetting>>("/settings/tax")).data.data, enabled: user?.role === "BUSINESS_ADMIN" });
+  const integrations = useQuery({ queryKey: ["integration-status"], queryFn: async () => (await api.get<ApiEnvelope<IntegrationStatus>>("/settings/integrations/status")).data.data });
+  useEffect(() => {
+    if (business.data) setProfile(business.data);
+  }, [business.data]);
+  useEffect(() => { if (taxQuery.data) setTax(taxQuery.data); }, [taxQuery.data]);
+  const saveSetting = useMutation({
+    mutationFn: () => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(value);
+      } catch {
+        parsed = value;
+      }
+      return api.put(`/settings/${encodeURIComponent(key)}`, { value: parsed });
+    },
+    onSuccess: async () => {
+      setNotice("Setting saved and recorded in the audit trail.");
+      await queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+  const saveProfile = useMutation({
+    mutationFn: () =>
+      api.patch(
+        "/businesses/profile",
+        profile
+          ? {
+              ...profile,
+              taxRate: Number(profile.taxRate),
+              defaultLabourCharge: Number(profile.defaultLabourCharge),
+              invoiceFooter: profile.invoiceFooter || undefined,
+              receiptFooter: profile.receiptFooter || undefined,
+            }
+          : {},
+      ),
+    onSuccess: async () => {
+      setNotice("Business profile updated.");
+      await queryClient.invalidateQueries({ queryKey: ["business-profile"] });
+    },
+  });
+  const saveTax = useMutation({ mutationFn: () => api.put("/settings/tax", tax), onSuccess: async () => { setNotice("Tax and eTIMS settings updated."); await queryClient.invalidateQueries({ queryKey: ["tax-settings"] }); } });
+  if (settings.isLoading || business.isLoading || taxQuery.isLoading || integrations.isLoading) return <LoadingBlock />;
+  const issue = settings.error ?? business.error ?? taxQuery.error ?? integrations.error;
+  if (issue) return <ErrorBlock message={apiMessage(issue)} />;
+  return (
+    <>
+      <PageHeader
+        title="Settings"
+        description="Business identity, document defaults, and scoped configuration."
+      />
+      {notice && (
+        <Alert severity="success" onClose={() => setNotice("")} sx={{ mb: 2 }}>
+          {notice}
+        </Alert>
+      )}
+      <Grid container spacing={3}>
+        {profile && (
+          <Grid size={{ xs: 12, lg: 7 }}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6">Business profile</Typography>
+                <Typography variant="body2" color="text.secondary" mb={3}>
+                  Displayed on invoices, receipts, and customer notifications.
+                </Typography>
+                <Stack spacing={2}>
+                  <TextField
+                    label="Business name"
+                    value={profile.name}
+                    onChange={(event) =>
+                      setProfile({ ...profile, name: event.target.value })
+                    }
+                  />
+                  <TextField
+                    type="url"
+                    label="Logo URL (HTTPS)"
+                    value={profile.logoUrl ?? ""}
+                    onChange={(event) => setProfile({ ...profile, logoUrl: event.target.value })}
+                    helperText="This logo is used on the web workspace, invoices, receipts, and customer messages."
+                  />
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                    <TextField
+                      fullWidth
+                      type="email"
+                      label="Email"
+                      value={profile.email}
+                      onChange={(event) =>
+                        setProfile({ ...profile, email: event.target.value })
+                      }
+                    />
+                    <TextField
+                      fullWidth
+                      label="Phone"
+                      value={profile.phone}
+                      onChange={(event) =>
+                        setProfile({ ...profile, phone: event.target.value })
+                      }
+                    />
+                  </Stack>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                    <TextField
+                      fullWidth
+                      label="KRA PIN"
+                      value={profile.taxPin ?? ""}
+                      onChange={(event) => setProfile({ ...profile, taxPin: event.target.value.toUpperCase() })}
+                      helperText="Printed on invoices when provided."
+                    />
+                    <TextField
+                      fullWidth
+                      type="number"
+                      label="Default labour charge"
+                      value={profile.defaultLabourCharge}
+                      onChange={(event) => setProfile({ ...profile, defaultLabourCharge: event.target.value })}
+                      helperText={`Amount in ${profile.currency}; automatically added to repair invoices.`}
+                    />
+                  </Stack>
+                  <Button
+                    variant={profile.allowInvoicePriceOverride ? "contained" : "outlined"}
+                    onClick={() => setProfile({ ...profile, allowInvoicePriceOverride: !profile.allowInvoicePriceOverride })}
+                  >
+                    {profile.allowInvoicePriceOverride ? "Inventory price override allowed" : "Use configured inventory prices"}
+                  </Button>
+                  <TextField
+                    label="Address"
+                    value={profile.address}
+                    onChange={(event) =>
+                      setProfile({ ...profile, address: event.target.value })
+                    }
+                  />
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                    <TextField
+                      fullWidth
+                      label="City"
+                      value={profile.city}
+                      onChange={(event) =>
+                        setProfile({ ...profile, city: event.target.value })
+                      }
+                    />
+                    <TextField
+                      fullWidth
+                      label="Country"
+                      value={profile.country}
+                      onChange={(event) =>
+                        setProfile({ ...profile, country: event.target.value })
+                      }
+                    />
+                  </Stack>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                    <TextField
+                      fullWidth
+                      label="Currency"
+                      value={profile.currency}
+                      onChange={(event) =>
+                        setProfile({ ...profile, currency: event.target.value })
+                      }
+                    />
+                    <TextField
+                      fullWidth
+                      type="number"
+                      label="Default tax rate (%)"
+                      value={profile.taxRate}
+                      onChange={(event) =>
+                        setProfile({ ...profile, taxRate: event.target.value })
+                      }
+                    />
+                  </Stack>
+                  <TextField
+                    multiline
+                    minRows={2}
+                    label="Invoice footer"
+                    value={profile.invoiceFooter ?? ""}
+                    onChange={(event) =>
+                      setProfile({
+                        ...profile,
+                        invoiceFooter: event.target.value,
+                      })
+                    }
+                  />
+                  <TextField
+                    multiline
+                    minRows={2}
+                    label="Receipt footer"
+                    value={profile.receiptFooter ?? ""}
+                    onChange={(event) =>
+                      setProfile({
+                        ...profile,
+                        receiptFooter: event.target.value,
+                      })
+                    }
+                  />
+                  <Button
+                    variant="contained"
+                    onClick={() => saveProfile.mutate()}
+                    disabled={saveProfile.isPending}
+                  >
+                    Save profile
+                  </Button>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
+        {tax && <Grid size={{ xs: 12, lg: 5 }}><Card><CardContent><Typography variant="h6">KRA / eTIMS readiness</Typography><Typography variant="body2" color="text.secondary" mb={2}>Submission is disabled until both business settings and external credentials are configured.</Typography><Stack spacing={2}><Alert severity={integrations.data?.kraEtims ? "success" : "warning"}>{integrations.data?.kraEtims ? "KRA adapter credentials detected" : "KRA adapter credentials are not configured"}</Alert><Button variant={tax.etimsEnabled ? "contained" : "outlined"} onClick={() => setTax({ ...tax, etimsEnabled: !tax.etimsEnabled })}>{tax.etimsEnabled ? "eTIMS submission enabled" : "Enable eTIMS after setup"}</Button><TextField select label="Environment" value={tax.environment} onChange={(event) => setTax({ ...tax, environment: event.target.value as TaxSetting["environment"] })}><MenuItem value="sandbox">Sandbox</MenuItem><MenuItem value="production">Production</MenuItem></TextField><TextField label="Branch code" value={tax.branchCode ?? ""} onChange={(event) => setTax({ ...tax, branchCode: event.target.value })} /><TextField label="Device identifier" value={tax.deviceIdentifier ?? ""} onChange={(event) => setTax({ ...tax, deviceIdentifier: event.target.value })} /><Button variant={tax.requireCustomerKraPin ? "contained" : "outlined"} onClick={() => setTax({ ...tax, requireCustomerKraPin: !tax.requireCustomerKraPin })}>{tax.requireCustomerKraPin ? "Customer KRA PIN required" : "Customer KRA PIN optional"}</Button><Button variant="contained" onClick={() => saveTax.mutate()} disabled={saveTax.isPending || (tax.etimsEnabled && !integrations.data?.kraEtims)}>Save tax settings</Button></Stack></CardContent></Card></Grid>}
+        <Grid size={{ xs: 12, lg: profile ? 5 : 12 }}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6">Configuration registry</Typography>
+              <Typography variant="body2" color="text.secondary" mb={3}>
+                Structured values support future integrations without hard-coded
+                secrets.
+              </Typography>
+              <Stack spacing={2}>
+                <TextField
+                  label="Setting key"
+                  value={key}
+                  onChange={(event) => setKey(event.target.value)}
+                />
+                <TextField
+                  multiline
+                  minRows={2}
+                  label="JSON or text value"
+                  value={value}
+                  onChange={(event) => setValue(event.target.value)}
+                />
+                <Button
+                  variant="outlined"
+                  onClick={() => saveSetting.mutate()}
+                  disabled={saveSetting.isPending}
+                >
+                  Save setting
+                </Button>
+                <Divider />
+                {(settings.data ?? []).map((setting) => (
+                  <Box key={setting.id}>
+                    <Typography fontWeight={750}>{setting.key}</Typography>
+                    <Typography
+                      component="pre"
+                      variant="caption"
+                      sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
+                    >
+                      {JSON.stringify(setting.value, null, 2)}
+                    </Typography>
+                  </Box>
+                ))}
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+    </>
+  );
 }
 
-interface MeProfile { id: string; email: string; fullName: string; phone?: string; avatarUrl?: string; status: string; role: { code: string }; business?: { name: string; currency: string; timeZone: string } }
+interface MeProfile {
+  id: string;
+  email: string;
+  fullName: string;
+  phone?: string;
+  avatarUrl?: string;
+  status: string;
+  role: { code: string };
+  business?: { name: string; currency: string; timeZone: string };
+}
 export function ProfilePage() {
-  const { logout } = useAuth(); const navigate = useNavigate(); const queryClient = useQueryClient(); const [confirmOpen, setConfirmOpen] = useState(false); const [editOpen, setEditOpen] = useState(false); const [confirmation, setConfirmation] = useState(""); const [form, setForm] = useState({ fullName: "", phone: "", avatarUrl: "" }); const query = useQuery({ queryKey: ["profile"], queryFn: async () => (await api.get<ApiEnvelope<MeProfile>>("/auth/me")).data.data }); const deletion = useMutation({ mutationFn: () => api.delete("/auth/account"), onSuccess: async () => { await logout(); void navigate("/login"); } }); const update = useMutation({ mutationFn: () => api.patch("/auth/me", { fullName: form.fullName, phone: form.phone || null, avatarUrl: form.avatarUrl || null }), onSuccess: async () => { setEditOpen(false); await queryClient.invalidateQueries({ queryKey: ["profile"] }); } });
-  useEffect(() => { if (query.data) setForm({ fullName: query.data.fullName, phone: query.data.phone ?? "", avatarUrl: query.data.avatarUrl ?? "" }); }, [query.data]);
-  if (query.isLoading) return <LoadingBlock />; if (query.error || !query.data) return <ErrorBlock message={apiMessage(query.error)} />; const profile = query.data;
-  return <><PageHeader title="My profile" description="Your identity and security context in RepairTrack." actions={<Button startIcon={<Edit />} variant="outlined" onClick={() => setEditOpen(true)}>Edit profile</Button>} /><Card sx={{ maxWidth: 760 }}><CardContent sx={{ p: 4 }}><Stack direction={{ xs: "column", sm: "row" }} spacing={3} alignItems={{ sm: "center" }}><Avatar src={profile.avatarUrl} sx={{ width: 80, height: 80, fontSize: 28 }}>{profile.fullName.slice(0, 1)}</Avatar><Box flex={1}><Typography variant="h5">{profile.fullName}</Typography><Typography color="text.secondary">{profile.email}</Typography><Stack direction="row" gap={1} mt={1}><StatusChip status={profile.status} /><Chip label={profile.role.code.replaceAll("_", " ")} variant="outlined" /></Stack></Box></Stack><Divider sx={{ my: 3 }} /><Grid container spacing={3}><Grid size={{ xs: 12, sm: 6 }}><KeyValue label="Phone" value={profile.phone} /></Grid><Grid size={{ xs: 12, sm: 6 }}><KeyValue label="Business" value={profile.business?.name} /></Grid><Grid size={{ xs: 12, sm: 6 }}><KeyValue label="Currency" value={profile.business?.currency} /></Grid><Grid size={{ xs: 12, sm: 6 }}><KeyValue label="Time zone" value={profile.business?.timeZone} /></Grid></Grid><Divider sx={{ my: 3 }} /><Typography variant="h6" color="error.main">Privacy controls</Typography><Typography color="text.secondary" mb={2}>Requesting deletion immediately revokes active sessions and queues the account for a privacy review.</Typography><Button color="error" variant="outlined" startIcon={<DeleteForever />} onClick={() => setConfirmOpen(true)}>Request account deletion</Button></CardContent></Card><FormDialog open={editOpen} title="Edit my profile" busy={update.isPending} error={update.error ? apiMessage(update.error) : undefined} onClose={() => setEditOpen(false)} onSubmit={() => update.mutate()} submitDisabled={form.fullName.trim().length < 2 || Boolean(form.phone && form.phone.trim().length < 7)}><TextField required label="Full name" value={form.fullName} onChange={(event) => setForm({ ...form, fullName: event.target.value })} /><TextField label="Phone" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /><TextField type="url" label="Avatar URL" value={form.avatarUrl} onChange={(event) => setForm({ ...form, avatarUrl: event.target.value })} helperText="Use an HTTPS image URL from an approved host." /></FormDialog><FormDialog open={confirmOpen} title="Request account deletion" busy={deletion.isPending} error={deletion.error ? apiMessage(deletion.error) : undefined} submitDisabled={confirmation !== "DELETE"} onClose={() => setConfirmOpen(false)} onSubmit={() => deletion.mutate()} submitLabel="Revoke sessions and request deletion"><Alert severity="warning">Type DELETE to confirm. Historical invoices and audit records may be retained where legally required.</Alert><TextField label="Confirmation" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} error={Boolean(confirmation && confirmation !== "DELETE")} disabled={deletion.isPending} />{confirmation !== "DELETE" && <Typography variant="caption" color="text.secondary">The confirmation button will only submit after the exact phrase is entered.</Typography>}</FormDialog></>;
+  const { logout } = useAuth();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
+  const [form, setForm] = useState({ fullName: "", phone: "", avatarUrl: "" });
+  const query = useQuery({
+    queryKey: ["profile"],
+    queryFn: async () =>
+      (await api.get<ApiEnvelope<MeProfile>>("/auth/me")).data.data,
+  });
+  const deletion = useMutation({
+    mutationFn: () => api.delete("/auth/account"),
+    onSuccess: async () => {
+      await logout();
+      void navigate("/login");
+    },
+  });
+  const update = useMutation({
+    mutationFn: () =>
+      api.patch("/auth/me", {
+        fullName: form.fullName,
+        phone: form.phone || null,
+        avatarUrl: form.avatarUrl || null,
+      }),
+    onSuccess: async () => {
+      setEditOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ["profile"] });
+    },
+  });
+  useEffect(() => {
+    if (query.data)
+      setForm({
+        fullName: query.data.fullName,
+        phone: query.data.phone ?? "",
+        avatarUrl: query.data.avatarUrl ?? "",
+      });
+  }, [query.data]);
+  if (query.isLoading) return <LoadingBlock />;
+  if (query.error || !query.data)
+    return <ErrorBlock message={apiMessage(query.error)} />;
+  const profile = query.data;
+  return (
+    <>
+      <PageHeader
+        title="My profile"
+        description="Your identity and security context in RepairTrack."
+        actions={
+          <Button
+            startIcon={<Edit />}
+            variant="outlined"
+            onClick={() => setEditOpen(true)}
+          >
+            Edit profile
+          </Button>
+        }
+      />
+      <Card sx={{ maxWidth: 760 }}>
+        <CardContent sx={{ p: 4 }}>
+          <Stack
+            direction={{ xs: "column", sm: "row" }}
+            spacing={3}
+            alignItems={{ sm: "center" }}
+          >
+            <Avatar
+              src={profile.avatarUrl}
+              sx={{ width: 80, height: 80, fontSize: 28 }}
+            >
+              {profile.fullName.slice(0, 1)}
+            </Avatar>
+            <Box flex={1}>
+              <Typography variant="h5">{profile.fullName}</Typography>
+              <Typography color="text.secondary">{profile.email}</Typography>
+              <Stack direction="row" gap={1} mt={1}>
+                <StatusChip status={profile.status} />
+                <Chip
+                  label={profile.role.code.replaceAll("_", " ")}
+                  variant="outlined"
+                />
+              </Stack>
+            </Box>
+          </Stack>
+          <Divider sx={{ my: 3 }} />
+          <Grid container spacing={3}>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <KeyValue label="Phone" value={profile.phone} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <KeyValue label="Business" value={profile.business?.name} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <KeyValue label="Currency" value={profile.business?.currency} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <KeyValue label="Time zone" value={profile.business?.timeZone} />
+            </Grid>
+          </Grid>
+          <Divider sx={{ my: 3 }} />
+          <Typography variant="h6" color="error.main">
+            Privacy controls
+          </Typography>
+          <Typography color="text.secondary" mb={2}>
+            Requesting deletion immediately revokes active sessions and queues
+            the account for a privacy review.
+          </Typography>
+          <Button
+            color="error"
+            variant="outlined"
+            startIcon={<DeleteForever />}
+            onClick={() => setConfirmOpen(true)}
+          >
+            Request account deletion
+          </Button>
+        </CardContent>
+      </Card>
+      <FormDialog
+        open={editOpen}
+        title="Edit my profile"
+        busy={update.isPending}
+        error={update.error ? apiMessage(update.error) : undefined}
+        onClose={() => setEditOpen(false)}
+        onSubmit={() => update.mutate()}
+        submitDisabled={
+          form.fullName.trim().length < 2 ||
+          Boolean(form.phone && form.phone.trim().length < 7)
+        }
+      >
+        <TextField
+          required
+          label="Full name"
+          value={form.fullName}
+          onChange={(event) =>
+            setForm({ ...form, fullName: event.target.value })
+          }
+        />
+        <TextField
+          label="Phone"
+          value={form.phone}
+          onChange={(event) => setForm({ ...form, phone: event.target.value })}
+        />
+        <TextField
+          type="url"
+          label="Avatar URL"
+          value={form.avatarUrl}
+          onChange={(event) =>
+            setForm({ ...form, avatarUrl: event.target.value })
+          }
+          helperText="Use an HTTPS image URL from an approved host."
+        />
+      </FormDialog>
+      <FormDialog
+        open={confirmOpen}
+        title="Request account deletion"
+        busy={deletion.isPending}
+        error={deletion.error ? apiMessage(deletion.error) : undefined}
+        submitDisabled={confirmation !== "DELETE"}
+        onClose={() => setConfirmOpen(false)}
+        onSubmit={() => deletion.mutate()}
+        submitLabel="Revoke sessions and request deletion"
+      >
+        <Alert severity="warning">
+          Type DELETE to confirm. Historical invoices and audit records may be
+          retained where legally required.
+        </Alert>
+        <TextField
+          label="Confirmation"
+          value={confirmation}
+          onChange={(event) => setConfirmation(event.target.value)}
+          error={Boolean(confirmation && confirmation !== "DELETE")}
+          disabled={deletion.isPending}
+        />
+        {confirmation !== "DELETE" && (
+          <Typography variant="caption" color="text.secondary">
+            The confirmation button will only submit after the exact phrase is
+            entered.
+          </Typography>
+        )}
+      </FormDialog>
+    </>
+  );
 }
 
-interface CustomerFull extends Customer { devices: Device[]; repairs: Repair[]; invoices: Invoice[] }
+interface CustomerFull extends Customer {
+  devices: Device[];
+  repairs: Repair[];
+  invoices: Invoice[];
+}
 export function CustomerDetailPage() {
-  const { id = "" } = useParams(); const { user } = useAuth(); const queryClient = useQueryClient(); const [open, setOpen] = useState(false); const query = useQuery({ queryKey: ["customer", id], queryFn: async () => (await api.get<ApiEnvelope<CustomerFull>>(`/customers/${id}`)).data.data }); const [form, setForm] = useState({ fullName: "", email: "", phone: "", alternativePhone: "", address: "", notes: "" });
-  useEffect(() => { if (query.data) setForm({ fullName: query.data.fullName, email: query.data.email ?? "", phone: query.data.phone, alternativePhone: query.data.alternativePhone ?? "", address: query.data.address ?? "", notes: query.data.notes ?? "" }); }, [query.data]);
-  const update = useMutation({ mutationFn: () => api.patch(`/customers/${id}`, { ...form, email: form.email || undefined, alternativePhone: form.alternativePhone || undefined, address: form.address || undefined, notes: form.notes || undefined }), onSuccess: async () => { setOpen(false); await queryClient.invalidateQueries({ queryKey: ["customer", id] }); await queryClient.invalidateQueries({ queryKey: ["customers"] }); } });
-  if (query.isLoading) return <LoadingBlock />; if (query.error || !query.data) return <ErrorBlock message={apiMessage(query.error)} />; const customer = query.data;
-  return <><Button component={Link} to="/customers" startIcon={<ArrowBack />} sx={{ mb: 2 }}>Back to customers</Button><PageHeader title={customer.fullName} description={`${customer.phone} · ${customer.email ?? "No email address"}`} actions={user?.role === "BUSINESS_ADMIN" ? <Button startIcon={<Edit />} variant="outlined" onClick={() => setOpen(true)}>Edit customer</Button> : undefined} /><Grid container spacing={3}><Grid size={{ xs: 12, md: 4 }}><Card><CardContent><Stack spacing={2}><KeyValue label="Phone" value={customer.phone} /><KeyValue label="Alternative phone" value={customer.alternativePhone} /><KeyValue label="Email" value={customer.email} /><KeyValue label="Address" value={customer.address} /><KeyValue label="Internal notes" value={customer.notes} /></Stack></CardContent></Card></Grid><Grid size={{ xs: 12, md: 8 }}><Card><CardContent><Typography variant="h6" mb={2}>Repair history</Typography>{customer.repairs.length ? customer.repairs.map((repair) => <Button component={Link} to={`/repairs/${repair.id}`} key={repair.id} fullWidth sx={{ justifyContent: "space-between" }}>{repair.reference}<StatusChip status={repair.status} /></Button>) : <Typography color="text.secondary">No repairs yet.</Typography>}</CardContent></Card><Card sx={{ mt: 3 }}><CardContent><Typography variant="h6" mb={2}>Registered devices</Typography><DataTable columns={["Device", "Serial / IMEI", "Reported fault"]} rows={customer.devices.map((device) => [`${device.brand} ${device.model}`, device.serialNumber ?? device.imei ?? "—", device.reportedFault])} /></CardContent></Card></Grid></Grid><FormDialog open={open} title="Edit customer" busy={update.isPending} error={update.error ? apiMessage(update.error) : undefined} onClose={() => setOpen(false)} onSubmit={() => update.mutate()}><TextField label="Full name" value={form.fullName} onChange={(event) => setForm({ ...form, fullName: event.target.value })} /><TextField label="Phone" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /><TextField label="Alternative phone" value={form.alternativePhone} onChange={(event) => setForm({ ...form, alternativePhone: event.target.value })} /><TextField type="email" label="Email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /><TextField label="Address" value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} /><TextField multiline minRows={3} label="Notes" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></FormDialog></>;
+  const { id = "" } = useParams();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteReason, setDeleteReason] = useState("");
+  const query = useQuery({
+    queryKey: ["customer", id],
+    queryFn: async () =>
+      (await api.get<ApiEnvelope<CustomerFull>>(`/customers/${id}`)).data.data,
+  });
+  const [form, setForm] = useState({
+    fullName: "",
+    email: "",
+    phone: "",
+    alternativePhone: "",
+    whatsappPhone: "",
+    customerType: "INDIVIDUAL",
+    kraPin: "",
+    preferredCommunication: "EMAIL",
+    address: "",
+    notes: "",
+  });
+  useEffect(() => {
+    if (query.data)
+      setForm({
+        fullName: query.data.fullName,
+        email: query.data.email ?? "",
+        phone: query.data.phone,
+        alternativePhone: query.data.alternativePhone ?? "",
+        whatsappPhone: query.data.whatsappPhone ?? "",
+        customerType: query.data.customerType ?? "INDIVIDUAL",
+        kraPin: query.data.kraPin ?? "",
+        preferredCommunication: query.data.preferredCommunication ?? "EMAIL",
+        address: query.data.address ?? "",
+        notes: query.data.notes ?? "",
+      });
+  }, [query.data]);
+  const update = useMutation({
+    mutationFn: () =>
+      api.patch(`/customers/${id}`, {
+        ...form,
+        email: form.email || undefined,
+        alternativePhone: form.alternativePhone || undefined,
+        whatsappPhone: form.whatsappPhone || undefined,
+        kraPin: form.kraPin || undefined,
+        address: form.address || undefined,
+        notes: form.notes || undefined,
+      }),
+    onSuccess: async () => {
+      setOpen(false);
+      await queryClient.invalidateQueries({ queryKey: ["customer", id] });
+      await queryClient.invalidateQueries({ queryKey: ["customers"] });
+    },
+  });
+  const deletion = useMutation({ mutationFn: () => api.delete(`/customers/${id}`, { data: { reason: deleteReason } }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["customers"] }); void navigate("/customers"); } });
+  if (query.isLoading) return <LoadingBlock />;
+  if (query.error || !query.data)
+    return <ErrorBlock message={apiMessage(query.error)} />;
+  const customer = query.data;
+  return (
+    <>
+      <Button
+        component={Link}
+        to="/customers"
+        startIcon={<ArrowBack />}
+        sx={{ mb: 2 }}
+      >
+        Back to customers
+      </Button>
+      <PageHeader
+        title={customer.fullName}
+        description={`${customer.phone} · ${customer.email ?? "No email address"}`}
+        actions={
+          user?.role === "BUSINESS_ADMIN" ? (
+            <Stack direction="row" gap={1}><Button
+              startIcon={<Edit />}
+              variant="outlined"
+              onClick={() => setOpen(true)}
+            >
+              Edit customer
+            </Button><Button color="error" startIcon={<DeleteForever />} onClick={() => setDeleteOpen(true)}>Deactivate</Button></Stack>
+          ) : undefined
+        }
+      />
+      <Grid container spacing={3}>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <Card>
+            <CardContent>
+              <Stack spacing={2}>
+                <KeyValue label="Phone" value={customer.phone} />
+                <KeyValue
+                  label="Alternative phone"
+                  value={customer.alternativePhone}
+                />
+                <KeyValue label="Email" value={customer.email} />
+                <KeyValue label="Customer type" value={customer.customerType?.replaceAll("_", " ")} />
+                <KeyValue label="KRA PIN" value={customer.kraPin} />
+                <KeyValue label="Preferred communication" value={customer.preferredCommunication?.replaceAll("_", " ")} />
+                <KeyValue label="Address" value={customer.address} />
+                <KeyValue label="Internal notes" value={customer.notes} />
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid size={{ xs: 12, md: 8 }}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" mb={2}>
+                Repair history
+              </Typography>
+              {customer.repairs.length ? (
+                customer.repairs.map((repair) => (
+                  <Button
+                    component={Link}
+                    to={`/repairs/${repair.id}`}
+                    key={repair.id}
+                    fullWidth
+                    sx={{ justifyContent: "space-between" }}
+                  >
+                    {repair.reference}
+                    <StatusChip status={repair.status} />
+                  </Button>
+                ))
+              ) : (
+                <Typography color="text.secondary">No repairs yet.</Typography>
+              )}
+            </CardContent>
+          </Card>
+          <Card sx={{ mt: 3 }}>
+            <CardContent>
+              <Typography variant="h6" mb={2}>
+                Registered devices
+              </Typography>
+              <DataTable
+                columns={["Device", "Serial / IMEI", "Reported fault"]}
+                rows={customer.devices.map((device) => [
+                  `${device.brand} ${device.model}`,
+                  device.serialNumber ?? device.imei ?? "—",
+                  device.reportedFault,
+                ])}
+              />
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+      <FormDialog
+        open={open}
+        title="Edit customer"
+        busy={update.isPending}
+        error={update.error ? apiMessage(update.error) : undefined}
+        onClose={() => setOpen(false)}
+        onSubmit={() => update.mutate()}
+      >
+        <TextField
+          label="Full name"
+          value={form.fullName}
+          onChange={(event) =>
+            setForm({ ...form, fullName: event.target.value })
+          }
+        />
+        <TextField
+          label="Phone"
+          value={form.phone}
+          onChange={(event) => setForm({ ...form, phone: event.target.value })}
+        />
+        <TextField
+          label="Alternative phone"
+          value={form.alternativePhone}
+          onChange={(event) =>
+            setForm({ ...form, alternativePhone: event.target.value })
+          }
+        />
+        <TextField
+          type="email"
+          label="Email"
+          value={form.email}
+          onChange={(event) => setForm({ ...form, email: event.target.value })}
+        />
+        <TextField label="WhatsApp phone" value={form.whatsappPhone} onChange={(event) => setForm({ ...form, whatsappPhone: event.target.value })} />
+        <Stack direction={{ xs: "column", sm: "row" }} gap={2}><TextField select fullWidth label="Customer type" value={form.customerType} onChange={(event) => setForm({ ...form, customerType: event.target.value })}><MenuItem value="INDIVIDUAL">Individual</MenuItem><MenuItem value="BUSINESS">Business</MenuItem></TextField><TextField fullWidth label="KRA PIN" value={form.kraPin} onChange={(event) => setForm({ ...form, kraPin: event.target.value.toUpperCase() })} /></Stack>
+        <TextField select label="Preferred communication" value={form.preferredCommunication} onChange={(event) => setForm({ ...form, preferredCommunication: event.target.value })}><MenuItem value="EMAIL">Email</MenuItem><MenuItem value="WHATSAPP">WhatsApp</MenuItem></TextField>
+        <TextField
+          label="Address"
+          value={form.address}
+          onChange={(event) =>
+            setForm({ ...form, address: event.target.value })
+          }
+        />
+        <TextField
+          multiline
+          minRows={3}
+          label="Notes"
+          value={form.notes}
+          onChange={(event) => setForm({ ...form, notes: event.target.value })}
+        />
+      </FormDialog>
+      <FormDialog open={deleteOpen} title="Deactivate customer" busy={deletion.isPending} error={deletion.error ? apiMessage(deletion.error) : undefined} onClose={() => setDeleteOpen(false)} onSubmit={() => deletion.mutate()} submitLabel="Deactivate and preserve history" submitDisabled={deleteReason.trim().length < 3}><Alert severity="warning">The customer disappears from active lists, while linked repairs, invoices, payments, and audit records remain intact.</Alert><TextField required multiline minRows={2} label="Reason" value={deleteReason} onChange={(event) => setDeleteReason(event.target.value)} /></FormDialog>
+    </>
+  );
 }
 
-interface PublicRepair { reference: string; device: { type: string; brand: string; model: string }; business: { name: string; logoUrl?: string; phone: string }; dateReceived: string; status: string; customerVisibleNotes?: string; estimatedCompletionAt?: string; invoices: { number: string; status: string; paymentStatus: string; balance: string }[]; statusHistory: { toStatus: string; customerMessage?: string; createdAt: string }[] }
+interface PublicRepair {
+  reference: string;
+  device: { type: string; brand: string; model: string };
+  business: { name: string; logoUrl?: string; phone: string };
+  dateReceived: string;
+  status: string;
+  customerFirstName: string;
+  customerVisibleNotes?: string;
+  estimatedCompletionAt?: string;
+  approval?: { version: number; estimateAmount: number; message?: string; items: { description: string; quantity: string; unitPrice: string; lineTotal: string }[] } | null;
+  customerResponse?: { decision: string; declineReason?: string; approvalVersion: number; createdAt: string } | null;
+  invoices: {
+    number: string;
+    status: string;
+    paymentStatus: string;
+    balance: string;
+  }[];
+  statusHistory: {
+    toStatus: string;
+    customerMessage?: string;
+    createdAt: string;
+  }[];
+}
 export function PublicTrackPage() {
-  const params = useParams(); const navigate = useNavigate(); const [token, setToken] = useState(params.token ?? ""); const query = useQuery({ queryKey: ["public-repair", params.token], queryFn: async () => (await api.get<ApiEnvelope<PublicRepair>>(`/repairs/track/${params.token}`)).data.data, enabled: Boolean(params.token), retry: false });
-  if (!params.token) return <Box minHeight="100vh" display="grid" sx={{ placeItems: "center" }} p={2}><Card sx={{ width: "100%", maxWidth: 560 }}><CardContent sx={{ p: { xs: 3, sm: 5 } }}><Box mb={3}><BrandLogo className="brand-logo--auth" /></Box><Typography variant="h4">Track your repair</Typography><Typography color="text.secondary" mt={1} mb={3}>Paste the private tracking token from your intake receipt or message.</Typography><Stack component="form" onSubmit={(event) => { event.preventDefault(); if (token.trim()) void navigate(`/track/${encodeURIComponent(token.trim())}`); }} spacing={2}><TextField label="Tracking token" value={token} onChange={(event) => setToken(event.target.value)} /><Button type="submit" variant="contained" startIcon={<Search />}>View repair status</Button><Button component={Link} to="/login">Sign in instead</Button></Stack></CardContent></Card></Box>;
-  if (query.isLoading) return <LoadingBlock label="Finding your repair" />; if (query.error || !query.data) return <Box minHeight="100vh" display="grid" sx={{ placeItems: "center" }}><Alert severity="error">That tracking link is invalid or expired. Check the complete link from the repair business.</Alert></Box>; const repair = query.data;
-  return <Box minHeight="100vh" bgcolor="background.default" py={{ xs: 3, md: 7 }} px={2}><Box maxWidth={850} mx="auto"><Stack direction="row" alignItems="center" gap={1.5} mb={4}><BrandLogo className="brand-logo--tracker" /><Box><Typography variant="h5">{repair.business.name}</Typography><Typography color="text.secondary">Customer repair tracker</Typography></Box></Stack><Card><CardContent sx={{ p: { xs: 3, md: 5 } }}><Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" gap={2}><Box><Typography variant="overline" color="text.secondary">Repair reference</Typography><Typography variant="h3">{repair.reference}</Typography><Typography color="text.secondary">{repair.device.brand} {repair.device.model} · {repair.device.type}</Typography></Box><Box><StatusChip status={repair.status} /></Box></Stack><Divider sx={{ my: 4 }} /><Typography variant="h6">Progress</Typography><Stack mt={3}>{repair.statusHistory.map((entry, index) => <Box key={`${entry.toStatus}-${entry.createdAt}`} pl={3} pb={3} position="relative" borderLeft={index < repair.statusHistory.length - 1 ? 2 : 0} borderColor="divider"><Box position="absolute" left={-7} top={2} width={12} height={12} borderRadius="50%" bgcolor="primary.main" /><Typography fontWeight={800}>{entry.toStatus.replaceAll("_", " ")}</Typography><Typography variant="caption" color="text.secondary">{new Date(entry.createdAt).toLocaleString()}</Typography>{entry.customerMessage && <Typography mt={.5}>{entry.customerMessage}</Typography>}</Box>)}</Stack>{repair.customerVisibleNotes && <Alert severity="info">{repair.customerVisibleNotes}</Alert>}{repair.invoices.length > 0 && <><Divider sx={{ my: 3 }} /><Typography variant="h6" mb={1}>Billing status</Typography>{repair.invoices.map((invoice) => <Stack key={invoice.number} direction="row" justifyContent="space-between" py={1}><span>{invoice.number}</span><span>{invoice.paymentStatus.replaceAll("_", " ")} · Balance KES {Number(invoice.balance).toLocaleString()}</span></Stack>)}</>}<Typography variant="body2" color="text.secondary" mt={4}>For changes or collection arrangements, contact {repair.business.name} at {repair.business.phone}.</Typography></CardContent></Card></Box></Box>;
+  const params = useParams();
+  const navigate = useNavigate();
+  const [token, setToken] = useState(params.token ?? "");
+  const [declineReason, setDeclineReason] = useState("");
+  const [responseNotice, setResponseNotice] = useState("");
+  const query = useQuery({
+    queryKey: ["public-repair", params.token],
+    queryFn: async () =>
+      (
+        await api.get<ApiEnvelope<PublicRepair>>(
+          `/repairs/track/${params.token}`,
+        )
+      ).data.data,
+    enabled: Boolean(params.token),
+    retry: false,
+  });
+  const respond = useMutation({
+    mutationFn: (decision: "ACCEPTED" | "DECLINED") => api.post(`/repairs/track/${params.token}/respond`, { decision, approvalVersion: query.data?.approval?.version, declineReason: decision === "DECLINED" ? declineReason : undefined }),
+    onSuccess: async (_data, decision) => { setResponseNotice(decision === "ACCEPTED" ? "Your approval was recorded. The repair team has been notified." : "Your decision was recorded. The repair team has been notified."); await query.refetch(); },
+  });
+  if (!params.token)
+    return (
+      <Box minHeight="100vh" display="grid" sx={{ placeItems: "center" }} p={2}>
+        <Card sx={{ width: "100%", maxWidth: 560 }}>
+          <CardContent sx={{ p: { xs: 3, sm: 5 } }}>
+            <Box mb={3}>
+              <BrandLogo className="brand-logo--auth" />
+            </Box>
+            <Typography variant="h4">Track your repair</Typography>
+            <Typography color="text.secondary" mt={1} mb={3}>
+              Paste the private tracking token from your intake receipt or
+              message.
+            </Typography>
+            <Stack
+              component="form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (token.trim())
+                  void navigate(`/track/${encodeURIComponent(token.trim())}`);
+              }}
+              spacing={2}
+            >
+              <TextField
+                label="Tracking token"
+                value={token}
+                onChange={(event) => setToken(event.target.value)}
+              />
+              <Button type="submit" variant="contained" startIcon={<Search />}>
+                View repair status
+              </Button>
+              <Button component={Link} to="/login">
+                Sign in instead
+              </Button>
+            </Stack>
+          </CardContent>
+        </Card>
+      </Box>
+    );
+  if (query.isLoading) return <LoadingBlock label="Finding your repair" />;
+  if (query.error || !query.data)
+    return (
+      <Box minHeight="100vh" display="grid" sx={{ placeItems: "center" }}>
+        <Alert severity="error">
+          That tracking link is invalid or expired. Check the complete link from
+          the repair business.
+        </Alert>
+      </Box>
+    );
+  const repair = query.data;
+  return (
+    <Box
+      minHeight="100vh"
+      bgcolor="background.default"
+      py={{ xs: 3, md: 7 }}
+      px={2}
+    >
+      <Box maxWidth={850} mx="auto">
+        <Stack direction="row" alignItems="center" gap={1.5} mb={4}>
+          <BrandLogo className="brand-logo--tracker" />
+          <Box>
+            <Typography variant="h5">{repair.business.name}</Typography>
+            <Typography color="text.secondary">
+              Customer repair tracker
+            </Typography>
+          </Box>
+        </Stack>
+        <Card>
+          <CardContent sx={{ p: { xs: 3, md: 5 } }}>
+            <Stack
+              direction={{ xs: "column", sm: "row" }}
+              justifyContent="space-between"
+              gap={2}
+            >
+              <Box>
+                <Typography variant="overline" color="text.secondary">
+                  Repair reference
+                </Typography>
+                <Typography variant="h3">{repair.reference}</Typography>
+                <Typography color="text.secondary">
+                  {repair.device.brand} {repair.device.model} ·{" "}
+                  {repair.device.type}
+                </Typography>
+              </Box>
+              <Box>
+                <StatusChip status={repair.status} />
+              </Box>
+            </Stack>
+            <Divider sx={{ my: 4 }} />
+            <Typography variant="h6">Progress</Typography>
+            <Stack mt={3}>
+              {repair.statusHistory.map((entry, index) => (
+                <Box
+                  key={`${entry.toStatus}-${entry.createdAt}`}
+                  pl={3}
+                  pb={3}
+                  position="relative"
+                  borderLeft={index < repair.statusHistory.length - 1 ? 2 : 0}
+                  borderColor="divider"
+                >
+                  <Box
+                    position="absolute"
+                    left={-7}
+                    top={2}
+                    width={12}
+                    height={12}
+                    borderRadius="50%"
+                    bgcolor="primary.main"
+                  />
+                  <Typography fontWeight={800}>
+                    {entry.toStatus.replaceAll("_", " ")}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {new Date(entry.createdAt).toLocaleString()}
+                  </Typography>
+                  {entry.customerMessage && (
+                    <Typography mt={0.5}>{entry.customerMessage}</Typography>
+                  )}
+                </Box>
+              ))}
+            </Stack>
+            {repair.customerVisibleNotes && (
+              <Alert severity="info">{repair.customerVisibleNotes}</Alert>
+            )}
+            {responseNotice && <Alert severity="success" sx={{ mt: 2 }}>{responseNotice}</Alert>}
+            {repair.approval && <Card variant="outlined" sx={{ mt: 3, borderColor: "primary.main" }}><CardContent><Typography variant="h6">Estimate approval required</Typography><Typography color="text.secondary">Hello {repair.customerFirstName}, review estimate version {repair.approval.version} before the repair continues.</Typography>{repair.approval.items.length > 0 && <DataTable columns={["Item", "Quantity", "Unit price", "Total"]} rows={repair.approval.items.map((item) => [item.description, Number(item.quantity), `KES ${Number(item.unitPrice).toLocaleString()}`, `KES ${Number(item.lineTotal).toLocaleString()}`])} />}<Typography variant="h5" mt={2}>Estimated total: KES {repair.approval.estimateAmount.toLocaleString()}</Typography><TextField fullWidth multiline minRows={2} label="Reason if declining" value={declineReason} onChange={(event) => setDeclineReason(event.target.value)} sx={{ mt: 2 }} /><Stack direction={{ xs: "column", sm: "row" }} gap={1.5} mt={2}><Button variant="contained" onClick={() => respond.mutate("ACCEPTED")} disabled={respond.isPending}>Accept estimate</Button><Button color="error" variant="outlined" onClick={() => respond.mutate("DECLINED")} disabled={respond.isPending || declineReason.trim().length < 3}>Decline estimate</Button></Stack>{respond.error && <Alert severity="error" sx={{ mt: 2 }}>{apiMessage(respond.error)}</Alert>}<Typography variant="caption" color="text.secondary" display="block" mt={2}>Your response is versioned, time-stamped, and cannot be submitted twice.</Typography></CardContent></Card>}
+            {repair.customerResponse && <Alert severity="info" sx={{ mt: 2 }}>Response recorded: {repair.customerResponse.decision.replaceAll("_", " ")}{repair.customerResponse.declineReason ? ` — ${repair.customerResponse.declineReason}` : ""}</Alert>}
+            {repair.invoices.length > 0 && (
+              <>
+                <Divider sx={{ my: 3 }} />
+                <Typography variant="h6" mb={1}>
+                  Billing status
+                </Typography>
+                {repair.invoices.map((invoice) => (
+                  <Stack
+                    key={invoice.number}
+                    direction="row"
+                    justifyContent="space-between"
+                    py={1}
+                  >
+                    <span>{invoice.number}</span>
+                    <span>
+                      {invoice.paymentStatus.replaceAll("_", " ")} · Balance KES{" "}
+                      {Number(invoice.balance).toLocaleString()}
+                    </span>
+                  </Stack>
+                ))}
+              </>
+            )}
+            <Typography variant="body2" color="text.secondary" mt={4}>
+              For changes or collection arrangements, contact{" "}
+              {repair.business.name} at {repair.business.phone}.
+            </Typography>
+          </CardContent>
+        </Card>
+      </Box>
+    </Box>
+  );
 }
