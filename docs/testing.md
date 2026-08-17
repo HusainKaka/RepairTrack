@@ -29,23 +29,22 @@ With an emulator/device:
 | Area | Result |
 |---|---|
 | Backend ESLint and TypeScript | Pass, zero errors/warnings |
-| Backend Vitest | 6 files, 18 tests passed |
+| Backend Vitest | 7 files, 25 tests passed |
 | Backend build | Pass |
 | Web ESLint and TypeScript | Pass, zero errors/warnings |
 | Web Vitest | 3 files, 5 tests passed |
-| Web production build | Pass; largest emitted chunk about 347 KB before gzip |
+| Web production build | Pass; 1,102 modules, largest emitted chunk about 348 KB before gzip |
 | Prisma schema/client | Generate and validate pass |
-| Migration structural validation | Prisma SQL and committed migration both contain 26 tables and 56 foreign keys |
-| Android clean build | Pass; debug APK generated |
-| Android JVM tests | 5 suites, 8 tests passed |
-| Android lint | Pass, no app issues |
+| Upgrade migration | Additive migration authored and schema validated; production deploy requires target database credentials and a backup |
+| Android Kotlin compile | Pass after the shared API contract upgrade |
+| Android JVM tests/lint | Rerun was blocked by a Windows/OneDrive lock in generated `android/app/build` output; no Kotlin compile error occurred |
 | Connected Compose UI test | Authored; not run because no emulator/device was available |
 | Live fresh PostgreSQL deploy | Not run on this machine because Docker/PostgreSQL was unavailable |
-| Google/SMTP/FCM/M-Pesa live tests | Not run because provider credentials were not supplied |
+| Google/SMTP/FCM/M-Pesa/WhatsApp/KRA live tests | Not run because provider credentials were not supplied |
 
 ## Coverage focus
 
-Backend tests exercise Argon2/session cryptography, safe account-state transitions, invoice calculations, manual payment evidence rules, allowed repair transitions, standardized API errors, unauthenticated access, invalid JWT, validation, XSS-shaped input, and rate/security headers. Web tests cover the API retry contract and reusable data/status components. Android tests cover API serialization, authentication ViewModel state, tracking-token parsing, navigation routes, and ESC/POS content/width.
+Backend tests exercise Argon2/session cryptography, encrypted tracking tokens, safe account-state transitions, invoice calculations and edit/delete policy, default labour, exact repair email milestones, tenant scoping, cash-basis profit, subscription verification, manual payment evidence, repair transitions, standardized API errors, and authentication/authorization boundaries. Web tests cover the API retry contract and reusable data/status components. Existing Android tests cover API serialization, authentication state, tracking-token parsing, navigation routes, and ESC/POS content/width.
 
 The Compose onboarding instrumentation test lives in `android/app/src/androidTest` and requires a running Android test target.
 
