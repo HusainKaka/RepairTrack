@@ -1,0 +1,2 @@
+PHP syntax check passed for all PHP files.
+HTTP login and lookup smoke pages passed.

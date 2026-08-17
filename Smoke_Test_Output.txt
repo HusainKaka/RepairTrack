@@ -1,0 +1,7 @@
+PASS: Admin demo user exists
+PASS: Admin password hash verifies
+PASS: Ticket reference format starts with RT-
+PASS: Ticket can be created and retrieved by reference
+PASS: Ticket status can be updated
+PASS: Audit trail records ticket events
+All smoke tests passed.
