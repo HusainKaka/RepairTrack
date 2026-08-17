@@ -1,54 +1,91 @@
 # Deployment guide
 
-## Recommended production topology
+## Vercel topology
 
-- Static `web/dist` on a CDN/static host (Vercel, Netlify, Cloudflare Pages, or equivalent)
-- Stateless Node backend on Render, Railway, Fly.io, a container platform, or a hardened VPS
-- Managed PostgreSQL with encryption, backups, point-in-time recovery, and private connectivity
-- HTTPS reverse proxy/load balancer; managed secret store; SMTP and Firebase provider accounts
+Use two Vercel projects connected to the same GitHub repository:
 
-## Backend release
+| Vercel project | Root Directory | Purpose |
+|---|---|---|
+| `repairtrack-api` | `backend` | Express API as a Vercel Function |
+| `repair-track-web` | `web` | React/Vite static web application |
 
-1. Provision PostgreSQL and create separate least-privilege migration/runtime roles where supported.
-2. Configure all required environment values. Use a randomly generated `JWT_SECRET`; never reuse development values.
-3. Build in CI:
+The backend's `vercel.json` routes requests to the Express adapter in `backend/api`. The web `vercel.json` publishes `dist` and provides a React Router SPA fallback.
 
-   ```bash
-   pnpm install --frozen-lockfile
-   pnpm --filter @repairtrack/backend prisma:generate
-   pnpm lint && pnpm typecheck && pnpm test && pnpm build
-   ```
+## Database first
 
-4. Back up the database, then run `pnpm --filter @repairtrack/backend prisma:migrate` as a release job.
-5. Start `node backend/dist/server.js` from the repository deployment artifact.
-6. Configure health check `/health` and readiness `/ready`. Do not send traffic until readiness succeeds.
-7. Set `TRUST_PROXY` to the actual trusted proxy hop count and `WEB_ORIGIN` to one exact HTTPS origin.
+Provision managed PostgreSQL/Neon with backups and point-in-time recovery. Keep two connection strings when the provider supplies them:
 
-Required secrets include `DATABASE_URL` and `JWT_SECRET`. Provider values:
+- pooled runtime URL for `DATABASE_URL` in the deployed API;
+- direct/non-pooled URL for the one-time Prisma migration command.
 
-- Google: `GOOGLE_WEB_CLIENT_ID`
-- SMTP: `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`
-- FCM HTTP v1: `FCM_PROJECT_ID`, `FCM_CLIENT_EMAIL`, `FCM_PRIVATE_KEY` (newlines encoded as `\n` if the host requires one-line secrets)
-- Future Daraja: `MPESA_ENVIRONMENT`, `MPESA_CONSUMER_KEY`, `MPESA_CONSUMER_SECRET`, `MPESA_SHORTCODE`, `MPESA_PASSKEY`
+Before a production schema change, create a restore point. From a trusted local PowerShell terminal, temporarily set the direct URL using single quotes so `&` characters remain part of the string:
 
-## Web release
+```powershell
+$env:DATABASE_URL = 'postgresql://USER:PASSWORD@HOST/DATABASE?sslmode=require&channel_binding=require'
+pnpm --filter=@repairtrack/backend prisma:generate
+pnpm --filter=@repairtrack/backend prisma:migrate
+```
 
-Set `VITE_API_URL=https://api.example.com/api/v1` and `VITE_GOOGLE_CLIENT_ID`, then run `pnpm --filter @repairtrack/web build`. Publish `web/dist` and add an SPA fallback to `/index.html`. Add security headers at the host: strict CSP tailored to Google Identity, HSTS, `X-Content-Type-Options`, referrer policy, and restrictive permissions policy.
+Clear the session value afterward with `Remove-Item Env:DATABASE_URL`. Migrations run once as a release step, not on every Vercel build.
 
-## Database operations
+## Backend Vercel project
 
-- Migrations run once as a release job, never concurrently on every replica.
-- Use connection pooling appropriate for Prisma/host limits.
-- Schedule encrypted backups and test point-in-time recovery.
-- Monitor connection saturation, slow queries, disk, replica lag, and failed migrations.
-- Roll back the application before attempting manual database reversal; forward-fix migrations are usually safer.
+Import the repository and set Root Directory to `backend`. Use:
 
-## Android release
+- Framework Preset: `Other`
+- Install Command: `pnpm install --frozen-lockfile`
+- Build Command: `pnpm prisma:generate && pnpm build`
+- Output Directory: leave blank
 
-Point `repairtrack.apiUrl` at the HTTPS API and configure Google/Firebase production identifiers through protected CI inputs. Build a signed AAB with `./gradlew bundleRelease`, test through internal/closed tracks, and keep signing material outside Git. Verify certificate fingerprints in Google Cloud after Play App Signing.
+Required Production environment variables:
 
-## Observability and incident readiness
+| Key | Value |
+|---|---|
+| `NODE_ENV` | `production` |
+| `DATABASE_URL` | pooled production PostgreSQL URL |
+| `JWT_SECRET` | random secret of at least 32 characters |
+| `WEB_ORIGIN` | exact public web URL, for example `https://repair-track-web.vercel.app` |
+| `PUBLIC_WEB_URL` | the same exact public web URL |
+| `TRUST_PROXY` | `1` |
 
-Aggregate structured API logs using request IDs while excluding secrets/PII. Alert on readiness failures, 5xx/429 spikes, failed sign-ins, provider failures, mail/FCM backlog, database pressure, low stock job failures, and unusual tenant-access denials. Preserve immutable audit logs separately from application debug logs.
+Add optional integration values from `backend/.env.example` only when configured with the provider. Never paste `KEY=value` into one box: Vercel's **Key** field receives only the name and **Value** receives only the value.
 
-Document rotation for database, JWT, SMTP, Firebase, OAuth, and Android signing credentials. JWT-secret rotation invalidates outstanding access tokens; coordinate it with session revocation and user communication.
+After deployment, verify:
+
+- `https://YOUR-API.vercel.app/health`
+- `https://YOUR-API.vercel.app/ready`
+
+The first confirms the function is running; the second confirms database connectivity.
+
+## Web Vercel project
+
+Import the same repository again as a separate project and set Root Directory to `web`. Use:
+
+- Framework Preset: `Vite`
+- Install Command: `pnpm install --frozen-lockfile`
+- Build Command: `pnpm build`
+- Output Directory: `dist`
+
+Production environment variables:
+
+| Key | Value |
+|---|---|
+| `VITE_API_URL` | `https://YOUR-API.vercel.app/api/v1` |
+| `VITE_GOOGLE_CLIENT_ID` | OAuth web client ID, or omit until Google login is configured |
+
+Redeploy the web project after changing any `VITE_*` value because Vite embeds it at build time. Then copy the final web domain back into the API's `WEB_ORIGIN` and `PUBLIC_WEB_URL` and redeploy the API.
+
+## Production validation
+
+Run locally before uploading:
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm --filter=@repairtrack/backend prisma:validate
+```
+
+After Vercel reports both projects as Ready, follow the manual checklist in [business upgrades](business-upgrades.md). Review function logs for failed provider calls, database connection pressure, 401/403 spikes, and 5xx responses. Configure provider credentials, alerting, retention, mail-domain authentication, and a restore drill before processing real customer data.
