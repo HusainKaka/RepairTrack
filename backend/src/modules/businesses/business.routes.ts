@@ -27,6 +27,8 @@ const businessSchema = z.object({
   country: z.string().trim().min(2).max(100).default("Kenya"),
   currency: z.string().trim().length(3).default("KES"),
   taxRate: z.number().min(0).max(100).default(0),
+  defaultLabourCharge: z.number().min(0).max(1_000_000).default(1500),
+  allowInvoicePriceOverride: z.boolean().default(true),
   receiptFooter: z.string().max(500).optional(),
   invoiceFooter: z.string().max(500).optional(),
   workingHours: z.record(z.string(), z.string()).default({ weekdays: "08:00-17:00" }),
@@ -59,7 +61,9 @@ router.post("/", authorize(RoleCode.SUPER_ADMIN), validate(businessSchema), asyn
   const inviteToken = createOpaqueToken();
   const result = await prisma.$transaction(async (tx) => {
     const adminRole = await tx.role.upsert({ where: { code: RoleCode.BUSINESS_ADMIN }, update: {}, create: { code: RoleCode.BUSINESS_ADMIN, name: "Business Administrator" } });
-    const business = await tx.business.create({ data: { name: input.name, logoUrl: input.logoUrl, registrationNumber: input.registrationNumber, taxPin: input.taxPin, email: input.email.toLowerCase(), phone: input.phone, whatsapp: input.whatsapp, address: input.address, city: input.city, country: input.country, currency: input.currency.toUpperCase(), taxRate: input.taxRate, receiptFooter: input.receiptFooter, invoiceFooter: input.invoiceFooter, workingHours: input.workingHours, timeZone: input.timeZone } });
+    const business = await tx.business.create({ data: { name: input.name, logoUrl: input.logoUrl, registrationNumber: input.registrationNumber, taxPin: input.taxPin, email: input.email.toLowerCase(), phone: input.phone, whatsapp: input.whatsapp, address: input.address, city: input.city, country: input.country, currency: input.currency.toUpperCase(), taxRate: input.taxRate, defaultLabourCharge: input.defaultLabourCharge, allowInvoicePriceOverride: input.allowInvoicePriceOverride, receiptFooter: input.receiptFooter, invoiceFooter: input.invoiceFooter, workingHours: input.workingHours, timeZone: input.timeZone } });
+    const starterPlan = await tx.subscriptionPlan.upsert({ where: { name: "Starter" }, update: {}, create: { name: "Starter", monthlyPrice: 2500, annualPrice: 25000, currency: "KES", trialDays: 14, repairLimit: 100, technicianLimit: 2, businessUserLimit: 3, storageMb: 1024, features: { inventory: true, reports: false, whatsapp: false, kraEtims: false } } });
+    await tx.businessSubscription.create({ data: { businessId: business.id, planId: starterPlan.id, status: "TRIAL", trialEnd: new Date(Date.now() + starterPlan.trialDays * 24 * 60 * 60_000) } });
     const admin = await tx.user.create({ data: { businessId: business.id, roleId: adminRole.id, email: input.administrator.email.toLowerCase(), fullName: input.administrator.fullName, phone: input.administrator.phone, status: AccountStatus.PENDING_VERIFICATION } });
     await tx.business.update({ where: { id: business.id }, data: { primaryAdminId: admin.id } });
     await tx.passwordReset.create({ data: { userId: admin.id, tokenHash: hashToken(inviteToken), expiresAt: new Date(Date.now() + 24 * 60 * 60_000) } });
@@ -80,7 +84,7 @@ router.patch("/:id/status", authorize(RoleCode.SUPER_ADMIN), validate(z.object({
 });
 
 router.get("/profile", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN), async (request, response) => {
-  const business = await prisma.business.findFirst({ where: { id: requireBusiness(request), deletedAt: null } });
+  const business = await prisma.business.findFirst({ where: { id: requireBusiness(request), deletedAt: null }, include: { taxSettings: true, subscription: { include: { plan: true } } } });
   if (!business) throw notFound("Business");
   response.json({ success: true, data: business });
 });
@@ -94,8 +98,19 @@ router.patch("/profile", authorize(RoleCode.BUSINESS_ADMIN), validate(businessSc
 
 router.get("/technicians", authorize(RoleCode.BUSINESS_ADMIN), async (request, response) => {
   const businessId = requireBusiness(request);
-  const technicians = await prisma.user.findMany({ where: { businessId, role: { code: RoleCode.TECHNICIAN }, deletedAt: null }, select: { id: true, fullName: true, email: true, phone: true, status: true, lastLoginAt: true, _count: { select: { assignedRepairs: true } } }, orderBy: { fullName: "asc" } });
+  const technicians = await prisma.user.findMany({ where: { businessId, deletedAt: null, OR: [{ role: { code: RoleCode.TECHNICIAN } }, { canTakeRepairJobs: true }] }, select: { id: true, fullName: true, email: true, phone: true, status: true, lastLoginAt: true, canTakeRepairJobs: true, role: { select: { code: true } }, _count: { select: { assignedRepairs: true } } }, orderBy: { fullName: "asc" } });
   response.json({ success: true, data: technicians });
+});
+
+router.put("/me/technician-capability", authorize(RoleCode.BUSINESS_ADMIN), validate(z.object({ enabled: z.boolean() })), async (request, response) => {
+  const businessId = requireBusiness(request);
+  const updated = await prisma.$transaction(async (tx) => {
+    const user = await tx.user.update({ where: { id: request.auth!.userId }, data: { canTakeRepairJobs: request.body.enabled } });
+    await tx.technicianProfile.upsert({ where: { userId: user.id }, update: { active: request.body.enabled }, create: { businessId, userId: user.id, active: request.body.enabled } });
+    await writeAudit(tx, request, { businessId, userId: user.id, userRole: request.auth!.role, action: "ADMIN_TECHNICIAN_CAPABILITY_CHANGED", resourceType: "user", resourceId: user.id, metadata: { enabled: request.body.enabled } });
+    return user;
+  });
+  response.json({ success: true, data: { id: updated.id, canTakeRepairJobs: updated.canTakeRepairJobs } });
 });
 
 router.post("/technicians", authorize(RoleCode.BUSINESS_ADMIN), validate(z.object({ fullName: z.string().trim().min(2).max(120), email: z.email(), phone: z.string().trim().min(7).max(30).optional() })), async (request, response) => {

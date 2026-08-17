@@ -1,9 +1,10 @@
-import { InvoiceStatus, RoleCode } from "../../generated/prisma/index.js";
+import { ExpenseCategory, InvoiceStatus, RoleCode } from "../../generated/prisma/index.js";
 import { Router } from "express";
 import { AppError } from "../../errors/app-error.js";
 import { prisma } from "../../lib/prisma.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import { authorize, requireBusiness } from "../../middleware/authorize.js";
+import { calculateCashBasisProfit } from "./profit-calculation.js";
 
 const router = Router();
 router.use(authenticate);
@@ -82,6 +83,22 @@ router.get("/analytics", authorize(RoleCode.BUSINESS_ADMIN), async (request, res
   }
   const itemIds = partGroups.map((item) => item.inventoryItemId); const itemNames = itemIds.length ? await prisma.inventoryItem.findMany({ where: { businessId, id: { in: itemIds } }, select: { id: true, name: true, sku: true } }) : []; const itemMap = new Map(itemNames.map((item) => [item.id, item]));
   response.json({ success: true, data: { from, to, repairsByStatus: [...statuses].map(([status, count]) => ({ status, count })), repairsByDevice: [...devices].sort((a, b) => b[1] - a[1]).map(([device, count]) => ({ device, count })), technicianPerformance: [...technicians.values()].sort((a, b) => b.completed - a.completed), invoices: invoiceGroups.map((item) => ({ status: item.status, paymentStatus: item.paymentStatus, count: item._count, total: Number(item._sum.total ?? 0), balance: Number(item._sum.balance ?? 0) })), payments: paymentGroups.map((item) => ({ method: item.method, count: item._count, amount: Number(item._sum.amount ?? 0) })), topParts: partGroups.map((item) => ({ ...itemMap.get(item.inventoryItemId), quantity: item._sum.quantity ?? 0 })) } });
+});
+
+router.get("/profit", authorize(RoleCode.BUSINESS_ADMIN), async (request, response) => {
+  const businessId = requireBusiness(request);
+  const fromParam = typeof request.query.from === "string" ? request.query.from : new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
+  const toParam = typeof request.query.to === "string" ? request.query.to : new Date().toISOString().slice(0, 10);
+  const from = new Date(`${fromParam}T00:00:00.000Z`);
+  const to = new Date(`${toParam}T23:59:59.999Z`);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) throw new AppError(422, "INVALID_REPORT_RANGE", "Choose a valid profit-report date range.");
+  const [payments, expenses] = await Promise.all([
+    prisma.payment.findMany({ where: { businessId, paidAt: { gte: from, lte: to }, invoice: { status: { notIn: ["CANCELLED", "VOID"] }, deletedAt: null } }, include: { invoice: { select: { total: true, items: { select: { itemType: true, lineTotal: true, quantity: true, historicalUnitCost: true } } } } } }),
+    prisma.businessExpense.findMany({ where: { businessId, status: "ACTIVE", expenseDate: { gte: from, lte: to } }, select: { amount: true, category: true } }),
+  ]);
+  const utilityCategories = new Set<ExpenseCategory>([ExpenseCategory.ELECTRICITY, ExpenseCategory.WATER, ExpenseCategory.INTERNET, ExpenseCategory.TELEPHONE, ExpenseCategory.GAS]);
+  const result = calculateCashBasisProfit(payments.map((payment) => ({ amount: Number(payment.amount), invoiceTotal: Number(payment.invoice.total), items: payment.invoice.items.map((item) => ({ itemType: item.itemType, lineTotal: Number(item.lineTotal), quantity: Number(item.quantity), historicalUnitCost: item.historicalUnitCost === null ? undefined : Number(item.historicalUnitCost) })) })), expenses.map((expense) => ({ amount: Number(expense.amount), utility: utilityCategories.has(expense.category) })));
+  response.json({ success: true, data: { from, to, ...result } });
 });
 
 router.get("/search", authorize(RoleCode.BUSINESS_ADMIN), async (request, response) => {
