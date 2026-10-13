@@ -2,11 +2,9 @@ import AssessmentOutlined from "@mui/icons-material/AssessmentOutlined";
 import BuildOutlined from "@mui/icons-material/BuildOutlined";
 import BusinessOutlined from "@mui/icons-material/BusinessOutlined";
 import ChevronLeft from "@mui/icons-material/ChevronLeft";
-import DarkModeOutlined from "@mui/icons-material/DarkModeOutlined";
 import DashboardOutlined from "@mui/icons-material/DashboardOutlined";
 import DevicesOutlined from "@mui/icons-material/DevicesOutlined";
 import Inventory2Outlined from "@mui/icons-material/Inventory2Outlined";
-import LightModeOutlined from "@mui/icons-material/LightModeOutlined";
 import LogoutOutlined from "@mui/icons-material/LogoutOutlined";
 import MenuIcon from "@mui/icons-material/Menu";
 import NotificationsNoneOutlined from "@mui/icons-material/NotificationsNoneOutlined";
@@ -147,13 +145,7 @@ const nav: NavItem[] = [
   },
 ];
 
-export function AppShell({
-  mode,
-  toggleMode,
-}: {
-  mode: "light" | "dark";
-  toggleMode: () => void;
-}) {
+export function AppShell() {
   const { user, logout } = useAuth();
   const theme = useTheme();
   const mobile = useMediaQuery(theme.breakpoints.down("md"));
@@ -329,15 +321,6 @@ export function AppShell({
               />
             )}
             <Box flex={1} />
-            <Tooltip title={`Use ${mode === "light" ? "dark" : "light"} mode`}>
-              <IconButton onClick={toggleMode}>
-                {mode === "light" ? (
-                  <DarkModeOutlined />
-                ) : (
-                  <LightModeOutlined />
-                )}
-              </IconButton>
-            </Tooltip>
             {user.role !== "SUPER_ADMIN" && (
               <Tooltip title="Notifications">
                 <IconButton onClick={() => navigate("/notifications")}>

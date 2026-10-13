@@ -8,28 +8,37 @@ a { color: inherit; text-decoration: none; }
 .login-panel { display: flex; align-items: center; justify-content: center; padding: 42px; background: var(--glass-surface); backdrop-filter: blur(24px); border: 1px solid var(--glass-border); border-radius: 32px; box-shadow: 0 28px 80px -55px rgba(0,65,136,.35), inset 0 1px 0 rgba(255,255,255,.5); }
 .login-story { position: relative; overflow: hidden; color: var(--brand-ink); padding: 52px; background: var(--glass-surface); backdrop-filter: blur(16px); border: 1px solid var(--glass-border); border-radius: 32px; display: flex; flex-direction: column; justify-content: space-between; gap: 36px; }
 .login-story__logo { width: min(260px, 65%); align-self: center; border-radius: 24px; box-shadow: 0 18px 50px -30px rgba(0,65,136,.3); }
-.brand-logo { display: inline-flex; align-items: center; gap: 11px; max-width: 100%; color: var(--brand-ink); }
-.brand-logo__mark { position: relative; display: block; flex: 0 0 52px; width: 52px; height: 52px; overflow: hidden; border-radius: 14px; background: #fff; }
-.brand-logo__mark img { position: absolute; width: 170%; max-width: none; left: -35%; top: -9%; height: auto; }
+.brand-logo { display: inline-flex; align-items: center; gap: 12px; max-width: 100%; color: var(--brand-ink); }
+.brand-logo__image { display: block; flex: 0 0 80px; width: 80px; height: 80px; object-fit: contain; }
 .brand-logo__text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.brand-logo__text strong { font-size: 23px; line-height: 1.1; letter-spacing: -.04em; }
+.brand-logo__text strong { font-size: 22px; line-height: 1.1; letter-spacing: -.04em; }
 .brand-logo__text > span { font-size: 10px; font-weight: 600; line-height: 1.4; color: var(--brand-muted); }
-.brand-logo--login .brand-logo__mark { flex-basis: 64px; width: 64px; height: 64px; }
+.brand-logo--login .brand-logo__image { flex-basis: 112px; width: 112px; height: 112px; }
 .brand-logo--login .brand-logo__text strong { font-size: 30px; }
 .brand-logo--login .brand-logo__text > span { font-size: 12px; }
-.brand-logo--tracker .brand-logo__mark { flex-basis: 44px; width: 44px; height: 44px; }
+.brand-logo--nav .brand-logo__text strong { font-size: 21px; }
+.brand-logo--tracker .brand-logo__image { flex-basis: 80px; width: 80px; height: 80px; }
 /* Fixed decorative layer sits behind the app and never intercepts form input. */
 .brand-backdrop { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
 #root { position: relative; z-index: 1; isolation: isolate; }
-.brand-backdrop__wash { position: absolute; inset: 0; background: radial-gradient(ellipse at 12% 14%, rgba(0,173,239,.16), transparent 42%), radial-gradient(ellipse at 91% 70%, rgba(0,85,184,.13), transparent 48%); }
-.brand-backdrop__ripples { position: absolute; width: min(110vw, 1400px); aspect-ratio: 1; right: -35%; top: -40%; }
-.brand-backdrop__ripples span { position: absolute; inset: 20%; border: 1px solid rgba(0,133,219,.18); border-radius: 50%; box-shadow: 0 0 0 50px rgba(0,153,230,.025), 0 0 0 100px rgba(0,153,230,.025); opacity: .6; }
+.aura-scene { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .8; mask-image: linear-gradient(to bottom, transparent, black 0%, black 80%, transparent); }
+.aura-ambient { position: absolute; border-radius: 50%; }
+.aura-ambient--blue { top: -12%; left: -12%; width: 52vw; height: 52vw; background: rgba(191,219,254,.35); filter: blur(7.5rem); }
+.aura-ambient--sky { bottom: -18%; right: -10%; width: 62vw; height: 62vw; background: rgba(186,230,253,.22); filter: blur(8.75rem); }
+.aura-ambient--white { top: 36%; left: 36%; width: 30vw; height: 30vw; background: rgba(255,255,255,.55); filter: blur(5rem); }
+.aura-dot-texture { position: absolute; inset: -4rem; opacity: .22; background-image: radial-gradient(circle at 1px 1px, rgba(15,23,42,.09) 1px, transparent 0); background-size: 2rem 2rem; }
+.mouse-ripples { position: absolute; inset: 0; }
+.mouse-ripples span { position: absolute; width: 180px; height: 180px; opacity: 0; border-radius: 50%; background: radial-gradient(ellipse, rgba(96,165,250,.22), rgba(191,219,254,.14) 38%, transparent 68%); filter: blur(8px); }
 @media (prefers-reduced-motion: no-preference) {
-  .brand-backdrop__ripples span { animation: brand-ripple 18s ease-out infinite; }
-  .brand-backdrop__ripples span:nth-child(2) { animation-delay: -6s; }
-  .brand-backdrop__ripples span:nth-child(3) { animation-delay: -12s; }
+  .aura-ambient--blue { animation: aura-drift-one 26s ease-in-out infinite; }
+  .aura-ambient--sky { animation: aura-drift-two 32s ease-in-out infinite; }
+  .aura-ambient--white { animation: aura-drift-three 30s ease-in-out infinite; }
+  .aura-dot-texture { animation: aura-dot-drift 38s linear infinite; }
 }
-@keyframes brand-ripple { 0% { transform: scale(.5); opacity: 0; } 25% { opacity: .6; } 100% { transform: scale(1.9); opacity: 0; } }
+@keyframes aura-dot-drift { from { transform: translate3d(0,0,0); } to { transform: translate3d(4rem,4rem,0); } }
+@keyframes aura-drift-one { 0%, 100% { transform: translate3d(0,0,0) scale(1); } 35% { transform: translate3d(4vw,3vh,0) scale(1.06); } 70% { transform: translate3d(-2vw,5vh,0) scale(.98); } }
+@keyframes aura-drift-two { 0%, 100% { transform: translate3d(0,0,0) scale(1); } 40% { transform: translate3d(-4vw,-3vh,0) scale(1.08); } 75% { transform: translate3d(3vw,-5vh,0) scale(.96); } }
+@keyframes aura-drift-three { 0%, 100% { transform: translate3d(0,0,0) scale(1); } 50% { transform: translate3d(2vw,-4vh,0) scale(1.05); } }
 @media (prefers-reduced-motion: reduce) { .page-enter, .MuiTouchRipple-root * { animation: none !important; } }
 @media (prefers-reduced-transparency: reduce) { .login-panel, .login-story, .MuiPaper-root { background: var(--glass-solid) !important; backdrop-filter: none !important; } .brand-backdrop { display: none; } }
 @supports not (backdrop-filter: blur(1px)) { .login-panel, .login-story, .MuiPaper-root { background: var(--glass-solid) !important; } }
@@ -37,5 +46,5 @@ a { color: inherit; text-decoration: none; }
 .metric-accent { height: 4px; width: 40px; border-radius: 99px; margin-bottom: 16px; }
 .page-enter { animation: page-in .25s ease both; }
 @keyframes page-in { from { opacity: 0; transform: translateY(5px); } }
-@media (max-width: 900px) { .login-shell { grid-template-columns: 1fr; padding: 16px; } .login-story { display: none; } .login-panel { padding: 28px 20px; border-radius: 24px; } }
+@media (max-width: 900px) { .login-shell { grid-template-columns: 1fr; padding: 16px; } .login-story { display: none; } .login-panel { padding: 28px 20px; border-radius: 24px; } .brand-logo--login .brand-logo__image { flex-basis: 92px; width: 92px; height: 92px; } .brand-logo--login .brand-logo__text strong { font-size: 27px; } .brand-logo--login .brand-logo__text > span { font-size: 10px; } }
 @media print { .no-print, .brand-backdrop { display: none !important; } body { background: white !important; } .MuiPaper-root { background: white !important; backdrop-filter: none !important; box-shadow: none !important; } }

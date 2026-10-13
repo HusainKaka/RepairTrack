@@ -57,8 +57,8 @@ export function LoginPage() {
     <Box className="login-story">
       <Typography variant="body2" fontWeight={700}>Husaini Tech Solutions</Typography>
       <Box component="img" className="login-story__logo" src="/husaini-tech-solutions.png" alt="Husaini Tech Solutions. Innovate, solve, empower." />
-      <Box maxWidth={650}><Typography variant="h3" fontWeight={750} lineHeight={1.12} mb={3}>Your workshop,<br />connected.</Typography><Typography fontSize={18} color="text.secondary" maxWidth={560}>repairTrack brings your front desk, technicians and customers together, while keeping private workshop notes secure.</Typography></Box>
-      <Typography variant="caption" color="text.secondary">repairTrack by Husaini Tech Solutions</Typography>
+      <Box maxWidth={650}><Typography variant="h3" fontWeight={750} lineHeight={1.12} mb={3}>Your workshop,<br />connected.</Typography><Typography fontSize={18} color="text.secondary" maxWidth={560}>RepairTrack brings your front desk, technicians and customers together, while keeping private workshop notes secure.</Typography></Box>
+      <Typography variant="caption" color="text.secondary">RepairTrack by Husaini Tech Solutions</Typography>
     </Box>
   </Box>;
 }

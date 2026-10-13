@@ -55,13 +55,7 @@ function NotFoundPage() {
   );
 }
 
-export function App({
-  mode,
-  toggleMode,
-}: {
-  mode: "light" | "dark";
-  toggleMode(): void;
-}) {
+export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
@@ -72,7 +66,7 @@ export function App({
       <Route path="/track" element={<PublicTrackPage />} />
       <Route path="/track/:token" element={<PublicTrackPage />} />
       <Route element={<ProtectedRoute />}>
-        <Route element={<AppShell mode={mode} toggleMode={toggleMode} />}>
+        <Route element={<AppShell />}>
           <Route index element={<DashboardPage />} />
           <Route element={<RoleRoute roles={["SUPER_ADMIN"]} />}>
             <Route path="businesses" element={<BusinessesPage />} />
