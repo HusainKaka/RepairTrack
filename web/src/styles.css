@@ -19,7 +19,7 @@ a { color: inherit; text-decoration: none; }
 .brand-logo--nav .brand-logo__text strong { font-size: 21px; }
 .brand-logo--tracker .brand-logo__image { flex-basis: 80px; width: 80px; height: 80px; }
 /* Fixed decorative layer sits behind the app and never intercepts form input. */
-.brand-backdrop { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.brand-backdrop { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
 #root { position: relative; z-index: 1; isolation: isolate; }
 .aura-scene { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .8; mask-image: linear-gradient(to bottom, transparent, black 0%, black 80%, transparent); }
 .aura-ambient { position: absolute; border-radius: 50%; }

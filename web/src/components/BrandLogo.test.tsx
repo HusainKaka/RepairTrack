@@ -14,6 +14,14 @@ describe("Husaini branding", () => {
     const theme = makeTheme(mode);
     expect(theme.palette.mode).toBe("light");
     expect(theme.palette.primary.main).toBe("#3B82F6");
-    expect(theme.components?.MuiCard?.styleOverrides?.root).toHaveProperty("backdropFilter", "blur(24px)");
+    expect(theme.components?.MuiCard?.styleOverrides?.root).toHaveProperty("backdropFilter", "none");
+  });
+  it("keeps text links flat and primary actions styled as buttons", () => {
+    const theme = makeTheme("light");
+    const styles = theme.components?.MuiButton?.styleOverrides;
+    expect(styles?.text).toHaveProperty("background", "transparent");
+    expect(styles?.text).toHaveProperty("boxShadow", "none");
+    expect(styles?.text).toHaveProperty("whiteSpace", "nowrap");
+    expect(styles?.contained).toHaveProperty("backdropFilter", "blur(16px)");
   });
 });
