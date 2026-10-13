@@ -971,7 +971,7 @@ export function PublicTrackPage() {
   return (
     <Box
       minHeight="100vh"
-      bgcolor="background.default"
+      bgcolor="transparent"
       py={{ xs: 3, md: 7 }}
       px={2}
     >

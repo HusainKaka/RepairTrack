@@ -289,7 +289,7 @@ export function AppShell({
           sx={{
             backdropFilter: "blur(16px)",
             bgcolor:
-              mode === "light" ? "rgba(248,250,252,.84)" : "rgba(7,16,31,.84)",
+              "var(--glass-surface)",
             borderBottom: 1,
             borderColor: "divider",
           }}

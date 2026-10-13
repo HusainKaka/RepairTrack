@@ -54,6 +54,11 @@ export function LoginPage() {
       <Typography textAlign="center" color="text.secondary" mt={3}>New customer? <Link component={RouterLink} to="/signup" fontWeight={750}>Create an account</Link></Typography>
       <Typography textAlign="center" mt={1}><Link component={RouterLink} to="/track" variant="body2">Track a repair without signing in</Link></Typography>
     </Box></Box>
-    <Box className="login-story"><Stack direction="row" alignItems="center" gap={1}><Box width={9} height={9} bgcolor="#34D399" borderRadius="50%" /><Typography variant="body2" fontWeight={700}>Secure repair operations, one clear timeline</Typography></Stack><Box position="relative" zIndex={1} maxWidth={650}><Typography variant="h2" fontWeight={800} lineHeight={1.05} mb={3}>Every device.<br />Every update.<br />Accounted for.</Typography><Typography fontSize={19} color="rgba(255,255,255,.72)" maxWidth={560}>RepairTrack connects your front desk, technicians, inventory, payments, and customers without exposing private workshop notes.</Typography><Stack direction="row" gap={4} mt={6}><Box><Typography variant="h4" fontWeight={800}>10</Typography><Typography color="rgba(255,255,255,.6)">repair stages</Typography></Box><Box><Typography variant="h4" fontWeight={800}>24/7</Typography><Typography color="rgba(255,255,255,.6)">customer tracking</Typography></Box><Box><Typography variant="h4" fontWeight={800}>1</Typography><Typography color="rgba(255,255,255,.6)">shared record</Typography></Box></Stack></Box><Typography variant="caption" color="rgba(255,255,255,.5)">Designed for independent ICT and electronics repair teams.</Typography></Box>
+    <Box className="login-story">
+      <Typography variant="body2" fontWeight={700}>Husaini Tech Solutions</Typography>
+      <Box component="img" className="login-story__logo" src="/husaini-tech-solutions.png" alt="Husaini Tech Solutions. Innovate, solve, empower." />
+      <Box maxWidth={650}><Typography variant="h3" fontWeight={750} lineHeight={1.12} mb={3}>Your workshop,<br />connected.</Typography><Typography fontSize={18} color="text.secondary" maxWidth={560}>repairTrack brings your front desk, technicians and customers together, while keeping private workshop notes secure.</Typography></Box>
+      <Typography variant="caption" color="text.secondary">repairTrack by Husaini Tech Solutions</Typography>
+    </Box>
   </Box>;
 }
