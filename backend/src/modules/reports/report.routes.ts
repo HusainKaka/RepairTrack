@@ -2,9 +2,11 @@ import { ExpenseCategory, InvoiceStatus, RoleCode } from "../../generated/prisma
 import { Router } from "express";
 import { AppError } from "../../errors/app-error.js";
 import { prisma } from "../../lib/prisma.js";
+import { csvCell } from "../../lib/csv.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import { authorize, requireBusiness } from "../../middleware/authorize.js";
 import { calculateCashBasisProfit } from "./profit-calculation.js";
+import { dashboardView } from "./dashboard-view.js";
 
 const router = Router();
 router.use(authenticate);
@@ -48,17 +50,16 @@ router.get("/dashboard", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN)
   const paymentMonths = new Map<string, number>();
   for (const item of recentRepairs) repairMonths.set(monthKey(item.createdAt), (repairMonths.get(monthKey(item.createdAt)) ?? 0) + 1);
   for (const item of recentPayments) paymentMonths.set(monthKey(item.paidAt), (paymentMonths.get(monthKey(item.paidAt)) ?? 0) + Number(item.amount));
-  response.json({ success: true, data: { repairsToday, statuses: Object.fromEntries(statusGroups.map((group) => [group.status, group._count])), customers, technicians, revenueToday: Number(revenueToday._sum.amount ?? 0), revenueMonth: Number(revenueMonth._sum.amount ?? 0), outstanding: { count: outstanding._count, amount: Number(outstanding._sum.balance ?? 0) }, lowStock: lowStock.filter((item) => item.quantity <= item.minimumStock), monthlyRepairs: [...repairMonths].map(([month, count]) => ({ month, count })), monthlyRevenue: [...paymentMonths].map(([month, total]) => ({ month, total })) } });
+  response.json({ success: true, data: dashboardView({ repairsToday, statuses: Object.fromEntries(statusGroups.map((group) => [group.status, group._count])), customers, technicians, revenueToday: Number(revenueToday._sum.amount ?? 0), revenueMonth: Number(revenueMonth._sum.amount ?? 0), outstanding: { count: outstanding._count, amount: Number(outstanding._sum.balance ?? 0) }, lowStock: lowStock.filter((item) => item.quantity <= item.minimumStock), monthlyRepairs: [...repairMonths].map(([month, count]) => ({ month, count })), monthlyRevenue: [...paymentMonths].map(([month, total]) => ({ month, total })) }, request.auth!.role) });
 });
 
 router.get("/repairs.csv", authorize(RoleCode.BUSINESS_ADMIN), async (request, response) => {
   const businessId = requireBusiness(request);
   const repairs = await prisma.repair.findMany({ where: { businessId, deletedAt: null }, include: { customer: true, device: true, assignedTechnician: true }, orderBy: { createdAt: "desc" } });
-  const escape = (value: string | number | Date | null | undefined): string => `"${(value instanceof Date ? value.toISOString() : String(value ?? "")).replaceAll('"', '""')}"`;
   const rows = [["Reference", "Customer", "Device", "Technician", "Status", "Priority", "Created"], ...repairs.map((repair) => [repair.reference, repair.customer.fullName, `${repair.device.brand} ${repair.device.model}`, repair.assignedTechnician?.fullName ?? "", repair.status, repair.priority, repair.createdAt.toISOString()])];
   response.setHeader("content-type", "text/csv; charset=utf-8");
   response.setHeader("content-disposition", "attachment; filename=repair-report.csv");
-  response.send(rows.map((row) => row.map(escape).join(",")).join("\r\n"));
+  response.send(rows.map((row) => row.map(csvCell).join(",")).join("\r\n"));
 });
 
 router.get("/analytics", authorize(RoleCode.BUSINESS_ADMIN), async (request, response) => {

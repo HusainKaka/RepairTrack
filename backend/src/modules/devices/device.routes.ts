@@ -4,6 +4,7 @@ import { z } from "zod";
 import { notFound } from "../../errors/app-error.js";
 import { writeAudit } from "../../lib/audit.js";
 import { prisma } from "../../lib/prisma.js";
+import { customerView } from "../../lib/customer-view.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import { authorize, requireBusiness } from "../../middleware/authorize.js";
 import { routeParam, validate } from "../../middleware/validate.js";
@@ -35,9 +36,10 @@ router.post("/", authorize(RoleCode.BUSINESS_ADMIN), validate(schema), async (re
 
 router.get("/:id", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN, RoleCode.CUSTOMER), async (request, response) => {
   const businessId = requireBusiness(request);
-  const device = await prisma.device.findFirst({ where: { id: routeParam(request.params.id), businessId, deletedAt: null, ...(request.auth!.role === RoleCode.CUSTOMER ? { customer: { userId: request.auth!.userId } } : {}) }, include: { customer: true, repairs: { where: { deletedAt: null }, orderBy: { createdAt: "desc" } } } });
+  const customerRestriction = request.auth!.role === RoleCode.CUSTOMER ? { customer: { userId: request.auth!.userId } } : {};
+  const device = await prisma.device.findFirst({ where: { id: routeParam(request.params.id), businessId, deletedAt: null, ...customerRestriction }, include: { customer: true, repairs: { where: { deletedAt: null, ...customerRestriction }, orderBy: { createdAt: "desc" } } } });
   if (!device) throw notFound("Device");
-  response.json({ success: true, data: device });
+  response.json({ success: true, data: request.auth!.role === RoleCode.CUSTOMER ? customerView(device) : device });
 });
 
 router.patch("/:id", authorize(RoleCode.BUSINESS_ADMIN), validate(schema.partial()), async (request, response) => {

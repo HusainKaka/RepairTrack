@@ -30,6 +30,8 @@ export function createApp() {
   app.use(express.json({ limit: "1mb", verify: (request, _response, buffer) => { (request as unknown as Express.Request).rawBody = Buffer.from(buffer); } }));
   app.use(express.urlencoded({ extended: false, limit: "100kb" }));
   app.use(cookieParser());
+  // Authenticated data and bearer tracking links must not enter shared caches.
+  app.use("/api/v1", (_request, response, next) => { response.setHeader("Cache-Control", "no-store"); next(); });
   app.use(rateLimit({ windowMs: 60_000, limit: 300, standardHeaders: "draft-8", legacyHeaders: false }));
 
   app.get("/health", (_request, response) => response.json({ success: true, data: { status: "ok", uptimeSeconds: Math.floor(process.uptime()) } }));

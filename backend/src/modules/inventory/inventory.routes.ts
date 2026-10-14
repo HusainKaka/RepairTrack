@@ -42,6 +42,10 @@ router.patch("/:id", authorize(RoleCode.BUSINESS_ADMIN), validate(itemSchema.omi
   const businessId = requireBusiness(request);
   const existing = await prisma.inventoryItem.findFirst({ where: { id: routeParam(request.params.id), businessId, deletedAt: null } });
   if (!existing) throw notFound("Inventory item");
+  if (request.body.supplierId) {
+    const supplier = await prisma.supplier.findFirst({ where: { id: request.body.supplierId, businessId, deletedAt: null } });
+    if (!supplier) throw notFound("Supplier");
+  }
   const item = await prisma.inventoryItem.update({ where: { id: existing.id }, data: request.body });
   await writeAudit(prisma, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "INVENTORY_ITEM_UPDATED", resourceType: "inventory_item", resourceId: item.id });
   response.json({ success: true, data: item });

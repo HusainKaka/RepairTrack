@@ -15,6 +15,7 @@ export async function recalculateInvoice(tx: TransactionClient, invoiceId: strin
   const balance = Math.max(calculation.total - amountPaid, 0);
   const paymentStatus = balance === 0 ? PaymentStatus.PAID : amountPaid > 0 ? PaymentStatus.PARTIALLY_PAID : PaymentStatus.UNPAID;
   await tx.invoice.update({ where: { id: invoiceId }, data: { subtotal: calculation.subtotal, taxAmount: calculation.taxAmount, discountAmount: calculation.discountAmount, invoiceLevelDiscount: appliedInvoiceDiscount, total: calculation.total, balance, paymentStatus, status: paymentStatus === PaymentStatus.PAID ? InvoiceStatus.PAID : invoice.status === InvoiceStatus.PAID ? InvoiceStatus.ISSUED : invoice.status } });
+  if (invoice.repairId) await tx.repair.updateMany({ where: { id: invoice.repairId, businessId: invoice.businessId, status: "AWAITING_CUSTOMER_APPROVAL", deletedAt: null }, data: { approvalVersion: { increment: 1 } } });
 }
 
 export async function ensureDraftInvoice(tx: TransactionClient, businessId: string, customerId: string, repairId: string): Promise<string> {

@@ -110,7 +110,7 @@ Backend required values:
 | `PUBLIC_WEB_URL` | Public links used in mail and QR output |
 | `TRUST_PROXY` | `0` locally; set only for the known reverse-proxy depth |
 
-Optional integrations use `GOOGLE_WEB_CLIENT_ID`, `SMTP_*`, `FCM_*`, `MPESA_*`, `WHATSAPP_*`, `KRA_ETIMS_*`, and `PAYMENT_GATEWAY_*`. All keys are described in `backend/.env.example` and [deployment](docs/deployment.md). Web compile-time values are `VITE_API_URL` and `VITE_GOOGLE_CLIENT_ID`.
+Optional integrations use `GOOGLE_WEB_CLIENT_ID`, `SMTP_*`, `FCM_*`, `MPESA_*`, `WHATSAPP_*`, `KRA_ETIMS_*`, and `PAYMENT_GATEWAY_*`. All keys are described in `backend/.env.example` and [deployment](docs/deployment.md). Web compile-time values include `VITE_GOOGLE_CLIENT_ID` and the development-only `VITE_API_URL`. Production browser API requests use `/api/v1` through the proxy configured in `web/vercel.json`.
 
 ## Android application
 

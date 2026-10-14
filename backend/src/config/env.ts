@@ -49,8 +49,12 @@ if (!parsed.success) {
   throw new Error(`Invalid environment configuration: ${details}`);
 }
 
-if (parsed.data.NODE_ENV === "production" && parsed.data.JWT_SECRET.includes("change-this")) {
-  throw new Error("JWT_SECRET must be replaced before production startup");
+if (parsed.data.NODE_ENV === "production") {
+  if (!process.env.JWT_SECRET || /change[-_ ]?this|test-only|development-only|CHANGE_ME/i.test(parsed.data.JWT_SECRET) || new Set(parsed.data.JWT_SECRET).size < 8) throw new Error("A strong, explicitly configured JWT_SECRET is required in production");
+  if (!process.env.DATABASE_URL || parsed.data.DATABASE_URL.includes("CHANGE_ME")) throw new Error("DATABASE_URL must be explicitly configured in production");
+  for (const name of ["WEB_ORIGIN", "PUBLIC_WEB_URL"] as const) {
+    if (!process.env[name] || new URL(parsed.data[name]).protocol !== "https:") throw new Error(`${name} must be explicitly configured with HTTPS in production`);
+  }
 }
 
 export const env = parsed.data;

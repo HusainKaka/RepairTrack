@@ -6,6 +6,7 @@ import { AppError } from "../../errors/app-error.js";
 import { writeAudit } from "../../lib/audit.js";
 import { prisma } from "../../lib/prisma.js";
 import { authenticate } from "../../middleware/authenticate.js";
+import { authOrigin } from "../../middleware/auth-origin.js";
 import { validate } from "../../middleware/validate.js";
 import { googleLogin, login, logout, refresh, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./auth.service.js";
 
@@ -15,9 +16,9 @@ const credentialLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 8, standardH
 const refreshCookie = "rt_refresh";
 const cookieOptions = { httpOnly: true, secure: env.NODE_ENV === "production", sameSite: "strict" as const, path: "/api/v1/auth", maxAge: env.REFRESH_TOKEN_TTL_DAYS * 86_400_000 };
 
-router.use(authLimiter);
+router.use(authOrigin, authLimiter);
 
-router.post("/signup", validate(z.object({ businessId: z.uuid(), email: z.email(), password: z.string(), fullName: z.string().trim().min(2).max(120), phone: z.string().trim().min(7).max(30) })), async (request, response) => {
+router.post("/signup", validate(z.object({ businessId: z.uuid(), email: z.email().max(254), password: z.string().max(128), fullName: z.string().trim().min(2).max(120), phone: z.string().trim().min(7).max(30) })), async (request, response) => {
   await registerCustomer(request.body, request);
   response.status(201).json({ success: true, data: { message: "Check your email to verify the account." } });
 });
@@ -28,7 +29,7 @@ router.post("/login", credentialLimiter, validate(z.object({ email: z.email(), p
   response.json({ success: true, data: { accessToken: result.accessToken, expiresInSeconds: result.expiresInSeconds, user: result.user } });
 });
 
-router.post("/google", credentialLimiter, validate(z.object({ idToken: z.string().min(50), businessId: z.uuid().optional() })), async (request, response) => {
+router.post("/google", credentialLimiter, validate(z.object({ idToken: z.string().min(50).max(8192), businessId: z.uuid().optional() })), async (request, response) => {
   const result = await googleLogin(request.body.idToken, request.body.businessId, request);
   response.cookie(refreshCookie, result.refreshToken, cookieOptions);
   response.json({ success: true, data: { accessToken: result.accessToken, expiresInSeconds: result.expiresInSeconds, user: result.user } });
@@ -48,7 +49,7 @@ router.post("/logout", async (request, response) => {
   response.status(204).end();
 });
 
-router.post("/verify-email", validate(z.object({ token: z.string().min(20) })), async (request, response) => {
+router.post("/verify-email", validate(z.object({ token: z.string().min(20).max(200) })), async (request, response) => {
   await verifyEmail(request.body.token);
   response.json({ success: true, data: { message: "Email verified." } });
 });
@@ -58,7 +59,7 @@ router.post("/forgot-password", credentialLimiter, validate(z.object({ email: z.
   response.json({ success: true, data: { message: "If the account exists, a reset email has been sent." } });
 });
 
-router.post("/reset-password", credentialLimiter, validate(z.object({ token: z.string().min(20), password: z.string() })), async (request, response) => {
+router.post("/reset-password", credentialLimiter, validate(z.object({ token: z.string().min(20).max(200), password: z.string().max(128) })), async (request, response) => {
   await resetPassword(request.body.token, request.body.password);
   response.json({ success: true, data: { message: "Password reset. Sign in again on all devices." } });
 });

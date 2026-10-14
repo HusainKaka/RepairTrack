@@ -4,6 +4,7 @@ import { z } from "zod";
 import { notFound } from "../../errors/app-error.js";
 import { writeAudit } from "../../lib/audit.js";
 import { prisma } from "../../lib/prisma.js";
+import { customerView } from "../../lib/customer-view.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import { authorize, requireBusiness } from "../../middleware/authorize.js";
 import { routeParam, validate } from "../../middleware/validate.js";
@@ -36,7 +37,7 @@ router.get("/:id", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN, RoleC
   const businessId = requireBusiness(request);
   const customer = await prisma.customer.findFirst({ where: { id: routeParam(request.params.id), businessId, deletedAt: null, ...(request.auth!.role === RoleCode.CUSTOMER ? { userId: request.auth!.userId } : {}) }, include: { devices: { where: { deletedAt: null } }, repairs: { where: { deletedAt: null }, orderBy: { createdAt: "desc" } }, invoices: { where: { deletedAt: null }, orderBy: { createdAt: "desc" } } } });
   if (!customer) throw notFound("Customer");
-  response.json({ success: true, data: customer });
+  response.json({ success: true, data: request.auth!.role === RoleCode.CUSTOMER ? customerView(customer) : customer });
 });
 
 router.patch("/:id", authorize(RoleCode.BUSINESS_ADMIN), validate(customerSchema.partial()), async (request, response) => {

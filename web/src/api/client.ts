@@ -1,7 +1,13 @@
 import axios, { type InternalAxiosRequestConfig } from "axios";
 
+export function apiBaseURL(production: boolean, developmentURL?: string): string {
+  // Vercel forwards production API calls through the web origin so Strict
+  // refresh cookies remain first-party even when the API is another deployment.
+  return production ? "/api/v1" : developmentURL ?? "http://localhost:4000/api/v1";
+}
+
 export const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL ?? "http://localhost:4000/api/v1",
+  baseURL: apiBaseURL(import.meta.env.PROD, import.meta.env.VITE_API_URL),
   withCredentials: true,
   headers: { "content-type": "application/json" }
 });

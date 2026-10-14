@@ -5,6 +5,7 @@ import { z } from "zod";
 import { notFound } from "../../errors/app-error.js";
 import { writeAudit } from "../../lib/audit.js";
 import { prisma } from "../../lib/prisma.js";
+import { csvCell } from "../../lib/csv.js";
 import { tenantWhere } from "../../lib/tenant.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import { authorize, requireBusiness } from "../../middleware/authorize.js";
@@ -62,11 +63,10 @@ router.get("/export.csv", async (request, response) => {
   const businessId = requireBusiness(request);
   const range = dateRange(request.query);
   const expenses = await prisma.businessExpense.findMany({ where: { businessId, status: ExpenseStatus.ACTIVE, ...(Object.keys(range).length ? { expenseDate: range } : {}) }, orderBy: { expenseDate: "desc" } });
-  const escape = (value: string | number | boolean | null | undefined): string => `"${String(value ?? "").replaceAll('"', '""')}"`;
   const rows = [["Date", "Category", "Description", "Supplier", "Amount", "Reference", "Recurring"], ...expenses.map((expense) => [expense.expenseDate.toISOString().slice(0, 10), expense.category, expense.description, expense.supplier ?? "", Number(expense.amount), expense.reference ?? "", expense.recurring])];
   response.setHeader("content-type", "text/csv; charset=utf-8");
   response.setHeader("content-disposition", "attachment; filename=business-expenses.csv");
-  response.send(rows.map((row) => row.map(escape).join(",")).join("\r\n"));
+  response.send(rows.map((row) => row.map(csvCell).join(",")).join("\r\n"));
 });
 
 export { router as expenseRouter };

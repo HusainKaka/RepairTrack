@@ -1,7 +1,6 @@
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
-import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import { loadPublicLogo } from "./public-image.js";
 
 const asBuffer = (document: PDFKit.PDFDocument): Promise<Buffer> => new Promise((resolve, reject) => {
   const chunks: Buffer[] = [];
@@ -11,24 +10,6 @@ const asBuffer = (document: PDFKit.PDFDocument): Promise<Buffer> => new Promise(
 });
 
 const money = (currency: string, value: unknown): string => `${currency} ${Number(value).toFixed(2)}`;
-
-const privateAddress = (address: string): boolean => address === "::1" || address.startsWith("fc") || address.startsWith("fd") || address.startsWith("fe80:") || /^(127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(address);
-
-async function loadPublicLogo(value: unknown): Promise<Buffer | null> {
-  if (typeof value !== "string") return null;
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "https:" || url.username || url.password) return null;
-    const addresses = isIP(url.hostname) ? [{ address: url.hostname }] : await lookup(url.hostname, { all: true });
-    if (!addresses.length || addresses.some((entry) => privateAddress(entry.address))) return null;
-    const result = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(8_000) });
-    if (!result.ok || !result.headers.get("content-type")?.startsWith("image/")) return null;
-    const buffer = Buffer.from(await result.arrayBuffer());
-    return buffer.length <= 2_000_000 ? buffer : null;
-  } catch {
-    return null;
-  }
-}
 
 export async function renderInvoicePdf(invoice: any, publicUrl: string): Promise<Buffer> {
   const document = new PDFDocument({ size: "A4", margin: 48, info: { Title: `Invoice ${invoice.number}`, Author: "RepairTrack" } });

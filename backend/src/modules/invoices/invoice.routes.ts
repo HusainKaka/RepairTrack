@@ -8,6 +8,7 @@ import { nextDocumentNumber } from "../../lib/identifiers.js";
 import { mailProvider } from "../../lib/mail.js";
 import { renderInvoicePdf, renderReceiptPdf } from "../../lib/pdf.js";
 import { prisma } from "../../lib/prisma.js";
+import { customerView } from "../../lib/customer-view.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import { authorize, requireBusiness } from "../../middleware/authorize.js";
 import { routeParam, validate } from "../../middleware/validate.js";
@@ -69,7 +70,7 @@ async function editableInvoice(invoiceId: string, businessId: string) {
 router.get("/", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.CUSTOMER), async (request, response) => {
   const businessId = requireBusiness(request);
   const invoices = await prisma.invoice.findMany({ where: { businessId, deletedAt: null, ...(request.auth!.role === RoleCode.CUSTOMER ? { customer: { userId: request.auth!.userId } } : {}) }, include: { customer: { select: { id: true, fullName: true } }, repair: { select: { id: true, reference: true } } }, orderBy: { createdAt: "desc" }, take: 100 });
-  response.json({ success: true, data: invoices });
+  response.json({ success: true, data: request.auth!.role === RoleCode.CUSTOMER ? customerView(invoices) : invoices });
 });
 
 router.post("/", authorize(RoleCode.BUSINESS_ADMIN), validate(invoiceSchema), async (request, response) => {
@@ -98,7 +99,7 @@ router.post("/", authorize(RoleCode.BUSINESS_ADMIN), validate(invoiceSchema), as
 router.get("/:id", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.CUSTOMER), async (request, response) => {
   const invoice = await getInvoiceForAccess(prisma, routeParam(request.params.id), requireBusiness(request), request.auth!.role === RoleCode.CUSTOMER ? request.auth!.userId : undefined);
   if (!invoice) throw notFound("Invoice");
-  response.json({ success: true, data: invoice });
+  response.json({ success: true, data: request.auth!.role === RoleCode.CUSTOMER ? customerView(invoice) : invoice });
 });
 
 router.patch("/:id", authorize(RoleCode.BUSINESS_ADMIN), validate(z.object({ dueAt: z.iso.datetime().nullable().optional(), invoiceDiscount: z.number().nonnegative().optional(), terms: z.string().trim().max(2000).nullable().optional(), notes: z.string().trim().max(2000).nullable().optional() })), async (request, response) => {

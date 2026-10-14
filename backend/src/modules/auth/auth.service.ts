@@ -141,10 +141,12 @@ export async function verifyEmail(rawToken: string): Promise<void> {
   const record = await prisma.emailVerification.findUnique({ where: { tokenHash: hashToken(rawToken) }, include: { user: { select: { status: true } } } });
   if (!record || record.usedAt || record.expiresAt <= new Date()) throw new AppError(400, "INVALID_VERIFICATION_TOKEN", "The verification link is invalid or expired.");
   assertEmailVerificationAllowed(record.user.status);
-  await prisma.$transaction([
-    prisma.emailVerification.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
-    prisma.user.update({ where: { id: record.userId }, data: { emailVerifiedAt: new Date(), status: AccountStatus.ACTIVE } })
-  ]);
+  await prisma.$transaction(async (tx) => {
+    const consumed = await tx.emailVerification.updateMany({ where: { id: record.id, usedAt: null, expiresAt: { gt: new Date() } }, data: { usedAt: new Date() } });
+    if (consumed.count !== 1) throw new AppError(400, "INVALID_VERIFICATION_TOKEN", "The verification link is invalid or expired.");
+    const updated = await tx.user.updateMany({ where: { id: record.userId, status: record.user.status, deletedAt: null }, data: { emailVerifiedAt: new Date(), status: AccountStatus.ACTIVE } });
+    if (updated.count !== 1) throw new AppError(400, "INVALID_VERIFICATION_TOKEN", "The account state has changed. Request a new verification link.");
+  });
 }
 
 export async function requestPasswordReset(email: string): Promise<void> {
@@ -162,11 +164,13 @@ export async function resetPassword(rawToken: string, password: string): Promise
   if (!record || record.usedAt || record.expiresAt <= new Date()) throw new AppError(400, "INVALID_RESET_TOKEN", "The reset link is invalid or expired.");
   const activationStatus = passwordResetActivation(record.user.status);
   const passwordHash = await hashPassword(password);
-  await prisma.$transaction([
-    prisma.passwordReset.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
-    prisma.user.update({ where: { id: record.userId }, data: { passwordHash, failedLoginCount: 0, lockedUntil: null, status: activationStatus } }),
-    prisma.session.updateMany({ where: { userId: record.userId, revokedAt: null }, data: { revokedAt: new Date() } })
-  ]);
+  await prisma.$transaction(async (tx) => {
+    const consumed = await tx.passwordReset.updateMany({ where: { id: record.id, usedAt: null, expiresAt: { gt: new Date() } }, data: { usedAt: new Date() } });
+    if (consumed.count !== 1) throw new AppError(400, "INVALID_RESET_TOKEN", "The reset link is invalid or expired.");
+    const updated = await tx.user.updateMany({ where: { id: record.userId, status: record.user.status, deletedAt: null }, data: { passwordHash, failedLoginCount: 0, lockedUntil: null, status: activationStatus } });
+    if (updated.count !== 1) throw new AppError(400, "INVALID_RESET_TOKEN", "The account state has changed. Request a new reset link.");
+    await tx.session.updateMany({ where: { userId: record.userId, revokedAt: null }, data: { revokedAt: new Date() } });
+  });
 }
 
 export async function googleLogin(idToken: string, businessId: string | undefined, request: Request): Promise<SessionResult> {
@@ -182,9 +186,13 @@ export async function googleLogin(idToken: string, businessId: string | undefine
     const role = await prisma.role.upsert({ where: { code: RoleCode.CUSTOMER }, update: {}, create: { code: RoleCode.CUSTOMER, name: "Customer" } });
     const created = await prisma.user.create({ data: { businessId, roleId: role.id, email: payload.email.toLowerCase(), fullName: payload.name ?? payload.email, googleSubject: payload.sub, emailVerifiedAt: new Date(), status: AccountStatus.ACTIVE } });
     user = { ...created, role, business: { status: "ACTIVE" } };
+  } else if (user.googleSubject && user.googleSubject !== payload.sub) {
+    throw new AppError(401, "GOOGLE_IDENTITY_MISMATCH", "This Google identity is not linked to the account.");
   } else if (!user.googleSubject) {
     assertGoogleLinkAllowed(user.status);
-    user = { ...(await prisma.user.update({ where: { id: user.id }, data: { googleSubject: payload.sub, emailVerifiedAt: user.emailVerifiedAt ?? new Date(), status: AccountStatus.ACTIVE } })), role: user.role, business: user.business };
+    const linked = await prisma.user.updateMany({ where: { id: user.id, status: user.status, googleSubject: null, deletedAt: null }, data: { googleSubject: payload.sub, emailVerifiedAt: user.emailVerifiedAt ?? new Date(), status: AccountStatus.ACTIVE } });
+    if (linked.count !== 1) throw new AppError(401, "GOOGLE_IDENTITY_MISMATCH", "The account changed while linking Google. Sign in again.");
+    user = { ...user, googleSubject: payload.sub, emailVerifiedAt: user.emailVerifiedAt ?? new Date(), status: AccountStatus.ACTIVE };
   }
   if (user.status !== AccountStatus.ACTIVE) throw new AppError(403, "ACCOUNT_INACTIVE", "The account is not active.");
   if (user.business && user.business.status !== "ACTIVE") throw new AppError(403, "BUSINESS_INACTIVE", "The business account is not active.");

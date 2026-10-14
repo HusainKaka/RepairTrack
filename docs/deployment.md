@@ -9,7 +9,9 @@ Use two Vercel projects connected to the same GitHub repository:
 | `repairtrack-api` | `backend` | Express API as a Vercel Function |
 | `repair-track-web` | `web` | React/Vite static web application |
 
-The backend's `vercel.json` routes requests to the Express adapter in `backend/api`. The web `vercel.json` publishes `dist` and provides a React Router SPA fallback.
+The backend's `vercel.json` routes requests to the Express adapter in `backend/api`. The web `vercel.json` publishes `dist`, proxies `/api/v1/:path*` to the API, and provides a React Router SPA fallback after that API rule.
+
+Production browser requests use the first-party path `/api/v1`. This keeps the HttpOnly, Secure, Strict SameSite refresh cookie on the web origin, even though the API runs as a separate Vercel project. The proxy target in `web/vercel.json` is currently `https://repairtrack-api-rho.vercel.app`; update that target if the API deployment domain changes. API responses must remain `Cache-Control: no-store`.
 
 ## Database first
 
@@ -70,10 +72,16 @@ Production environment variables:
 
 | Key | Value |
 |---|---|
-| `VITE_API_URL` | `https://YOUR-API.vercel.app/api/v1` |
+| `VITE_API_URL` | Development only; production always uses the same-origin `/api/v1` proxy |
 | `VITE_GOOGLE_CLIENT_ID` | OAuth web client ID, or omit until Google login is configured |
 
 Redeploy the web project after changing any `VITE_*` value because Vite embeds it at build time. Then copy the final web domain back into the API's `WEB_ORIGIN` and `PUBLIC_WEB_URL` and redeploy the API.
+
+Before merging security changes, confirm the required production values above. Startup rejects development signing secrets, placeholder database credentials, and missing/non-HTTPS web URLs. Use a preview/staging environment to verify login, page reload/token refresh, logout, customer tracking, invoice PDFs, and configured Google/AURA integrations. A localhost Vite preview does not execute Vercel's external rewrite, so it cannot replace this deployment test.
+
+For staging, point the web proxy to the matching staging API and set that API's `WEB_ORIGIN` and `PUBLIC_WEB_URL` to the staging web origin. Use a separate staging database and provider sandbox credentials. A preview web domain is intentionally not authorized by the production API's origin check.
+
+Plan signing-secret rotation separately: the existing tracking-token encryption key is derived from `JWT_SECRET`. Preserve/re-encrypt existing tracking-token ciphertext before rotating it; do not change production secrets casually during this code update.
 
 ## Production validation
 

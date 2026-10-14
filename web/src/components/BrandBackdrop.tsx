@@ -7,6 +7,8 @@ function loadRuntime() {
   runtimePromise ??= new Promise<UnicornRuntime>((resolve, reject) => {
     const script = document.createElement("script");
     script.src = runtimeUrl;
+    script.integrity = "sha384-Xg8DtdOWbiPrB2CcbZPF1rDwqrUpJcomkAg9OblxsedMf+s4gGou6PjcM9FKTfCs";
+    script.crossOrigin = "anonymous";
     script.async = true;
     script.onload = () => {
       const runtime = (window as Window & { UnicornStudio?: UnicornRuntime }).UnicornStudio;

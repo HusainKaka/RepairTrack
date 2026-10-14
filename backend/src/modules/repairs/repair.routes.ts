@@ -7,6 +7,7 @@ import { writeAudit } from "../../lib/audit.js";
 import { createOpaqueToken, encryptPublicToken, hashToken } from "../../lib/crypto.js";
 import { nextDocumentNumber } from "../../lib/identifiers.js";
 import { prisma } from "../../lib/prisma.js";
+import { customerView } from "../../lib/customer-view.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import { authorize, requireBusiness } from "../../middleware/authorize.js";
 import { routeParam, validate } from "../../middleware/validate.js";
@@ -74,8 +75,9 @@ router.post("/track/:token/respond", validate(z.object({ token: z.string().min(3
   if (request.body.decision === CustomerRepairDecision.DECLINED && !request.body.declineReason) throw new AppError(422, "DECLINE_REASON_REQUIRED", "Please provide a short reason for declining the estimate.");
   const nextStatus = request.body.decision === CustomerRepairDecision.ACCEPTED ? RepairStatus.IN_PROGRESS : RepairStatus.CANCELLED;
   const result = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.repair.updateMany({ where: { id: repair.id, approvalVersion: request.body.approvalVersion, status: RepairStatus.AWAITING_CUSTOMER_APPROVAL, deletedAt: null }, data: { status: nextStatus } });
+    if (claimed.count !== 1) throw new AppError(409, "APPROVAL_NOT_AVAILABLE", "This approval request is no longer active.");
     const decision = await tx.customerRepairResponse.create({ data: { businessId: repair.businessId, repairId: repair.id, customerId: repair.customerId, decision: request.body.decision, approvalVersion: repair.approvalVersion, estimateAmountPresented: repair.invoices[0]?.total ?? repair.estimatedCost, declineReason: request.body.declineReason, ipAddress: request.ip, userAgent: request.get("user-agent")?.slice(0, 500) } });
-    await tx.repair.update({ where: { id: repair.id }, data: { status: nextStatus, completedAt: undefined } });
     await tx.repairStatusHistory.create({ data: { businessId: repair.businessId, repairId: repair.id, fromStatus: repair.status, toStatus: nextStatus, customerMessage: request.body.decision === CustomerRepairDecision.ACCEPTED ? "The customer approved the estimate." : "The customer declined the estimate." } });
     await writeAudit(tx, request, { businessId: repair.businessId, action: request.body.decision === CustomerRepairDecision.ACCEPTED ? "CUSTOMER_ESTIMATE_ACCEPTED" : "CUSTOMER_ESTIMATE_DECLINED", resourceType: "repair", resourceId: repair.id, metadata: { approvalVersion: repair.approvalVersion, decision: request.body.decision } });
     return decision;
@@ -97,7 +99,7 @@ router.get("/", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN, RoleCode
     where: { businessId, deletedAt: null, ...technicianRestriction(request), ...customerRestriction, ...(status ? { status } : {}), ...(search ? { OR: [{ reference: { contains: search, mode: "insensitive" } }, { customer: { fullName: { contains: search, mode: "insensitive" } } }, { device: { serialNumber: { contains: search, mode: "insensitive" } } }, { device: { imei: { contains: search } } }] } : {}) },
     take: 100, orderBy: [{ priority: "desc" }, { createdAt: "desc" }], include: { customer: { select: { id: true, fullName: true, phone: true } }, device: { select: { id: true, type: true, brand: true, model: true, serialNumber: true } }, assignedTechnician: { select: { id: true, fullName: true } } }
   });
-  response.json({ success: true, data: repairs });
+  response.json({ success: true, data: request.auth!.role === RoleCode.CUSTOMER ? customerView(repairs) : repairs });
 });
 
 router.post("/", authorize(RoleCode.BUSINESS_ADMIN), validate(createSchema), async (request, response) => {
@@ -132,8 +134,7 @@ router.get("/:id", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN, RoleC
   const repair = await prisma.repair.findFirst({ where: { id: routeParam(request.params.id), businessId, deletedAt: null, ...technicianRestriction(request), ...(request.auth!.role === RoleCode.CUSTOMER ? { customer: { userId: request.auth!.userId } } : {}) }, include: { customer: true, device: true, assignedTechnician: { select: { id: true, fullName: true, email: true } }, customerResponses: { orderBy: { createdAt: "desc" } }, statusHistory: { orderBy: { createdAt: "asc" } }, notes: { where: request.auth!.role === RoleCode.CUSTOMER ? { visibility: "CUSTOMER" } : {}, include: { author: { select: { fullName: true } } }, orderBy: { createdAt: "asc" } }, parts: { include: { inventoryItem: { select: { name: true, sku: true } } } }, invoices: { where: { deletedAt: null } } } });
   if (!repair) throw notFound("Repair");
   if (request.auth!.role === RoleCode.CUSTOMER) {
-    const { internalNotes: _internalNotes, diagnosis: _diagnosis, ...safe } = repair;
-    response.json({ success: true, data: safe });
+    response.json({ success: true, data: customerView(repair) });
     return;
   }
   response.json({ success: true, data: repair });
@@ -144,7 +145,8 @@ router.patch("/:id", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN), va
   const existing = await prisma.repair.findFirst({ where: { id: routeParam(request.params.id), businessId, deletedAt: null, ...technicianRestriction(request) } });
   if (!existing) throw notFound("Repair");
   const input = request.body;
-  const updated = await prisma.repair.update({ where: { id: existing.id }, data: { ...input, estimatedCompletionAt: input.estimatedCompletionAt ? new Date(input.estimatedCompletionAt) : undefined } });
+  const estimateChanged = existing.status === RepairStatus.AWAITING_CUSTOMER_APPROVAL && input.estimatedCost !== undefined && Number(existing.estimatedCost ?? 0) !== input.estimatedCost;
+  const updated = await prisma.repair.update({ where: { id: existing.id }, data: { ...input, ...(estimateChanged ? { approvalVersion: { increment: 1 } } : {}), estimatedCompletionAt: input.estimatedCompletionAt ? new Date(input.estimatedCompletionAt) : undefined } });
   await writeAudit(prisma, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "REPAIR_UPDATED", resourceType: "repair", resourceId: updated.id });
   response.json({ success: true, data: updated });
 });

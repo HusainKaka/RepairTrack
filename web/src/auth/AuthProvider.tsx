@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type PropsWithChildren } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { api, setAccessToken } from "../api/client";
 import type { ApiEnvelope, Role, User } from "../types";
 
@@ -16,13 +17,16 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 interface SessionResponse { accessToken: string; expiresInSeconds: number; user: User }
 
 export function AuthProvider({ children }: PropsWithChildren) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   const applySession = useCallback((session: SessionResponse) => {
+    // Query keys are shared by pages; never carry one account's data into another.
+    queryClient.clear();
     setAccessToken(session.accessToken);
     setUser(session.user);
-  }, []);
+  }, [queryClient]);
 
   useEffect(() => {
     let active = true;
@@ -41,8 +45,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, [applySession]);
 
   const logout = useCallback(async () => {
-    try { await api.post("/auth/logout"); } finally { setAccessToken(null); setUser(null); }
-  }, []);
+    try { await api.post("/auth/logout"); } finally { setAccessToken(null); queryClient.clear(); setUser(null); }
+  }, [queryClient]);
 
   const value = useMemo<AuthContextValue>(() => ({ user, loading, login, loginWithGoogle, logout, hasRole: (...roles) => Boolean(user && roles.includes(user.role)) }), [loading, login, loginWithGoogle, logout, user]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
