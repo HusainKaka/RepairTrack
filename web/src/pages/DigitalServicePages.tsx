@@ -15,6 +15,7 @@ import { CreateButton, DataTable, FormDialog, KeyValue } from "../components/Dat
 import { ErrorBlock, LoadingBlock } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { StatusChip } from "../components/StatusChip";
+import { WhatsAppShareButton } from "../components/WhatsAppShareButton";
 import type { ApiEnvelope, Customer, DigitalServiceKind, DigitalServiceStatus, DigitalTicket, DigitalTicketDetail, PublicDigitalTicket, Technician } from "../types";
 
 const kinds: Record<DigitalServiceKind, string> = { WEBSITE: "Website", SOFTWARE: "Software", AI_AGENT: "AI agent" };
@@ -65,12 +66,15 @@ export function DigitalServicesPage() {
   const [form, setForm] = useState(emptyIntake);
   const [customerMode, setCustomerMode] = useState<"existing" | "new">("existing");
   const [newCustomer, setNewCustomer] = useState(emptyCustomer);
-  const [created, setCreated] = useState<{ reference: string; trackingUrl: string } | null>(null);
+  const [created, setCreated] = useState<{ reference: string; trackingUrl: string; kind: DigitalServiceKind; customerName: string; phone?: string; whatsappPhone?: string } | null>(null);
   const tickets = useQuery({ queryKey: ["digital-services", kind, status], queryFn: async () => (await api.get<ApiEnvelope<DigitalTicket[]>>("/digital-services", { params: { kind: kind || undefined, status: status || undefined } })).data.data });
   const customers = useQuery({ queryKey: ["customers"], queryFn: async () => (await api.get<ApiEnvelope<Customer[]>>("/customers")).data.data, enabled: admin });
   const technicians = useQuery({ queryKey: ["technicians"], queryFn: async () => (await api.get<ApiEnvelope<Technician[]>>("/businesses/technicians")).data.data, enabled: admin });
   const create = useMutation({
-    mutationFn: async () => (await api.post<ApiEnvelope<DigitalTicket> & { trackingUrl: string }>("/digital-services", {
+    mutationFn: async () => {
+      const selectedCustomer = customerMode === "new" ? newCustomer : customers.data?.find((customer) => customer.id === form.customerId);
+      const contact = { customerName: selectedCustomer?.fullName ?? "", phone: selectedCustomer?.phone, whatsappPhone: selectedCustomer?.whatsappPhone };
+      const response = (await api.post<ApiEnvelope<DigitalTicket> & { trackingUrl: string }>("/digital-services", {
       ...form,
       customerId: customerMode === "existing" ? form.customerId : undefined,
       newCustomer: customerMode === "new" ? { ...newCustomer, email: newCustomer.email || undefined, whatsappPhone: newCustomer.whatsappPhone || undefined } : undefined,
@@ -78,9 +82,11 @@ export function DigitalServicesPage() {
       estimatedCompletionAt: form.estimatedCompletionAt ? new Date(form.estimatedCompletionAt).toISOString() : undefined,
       internalNotes: form.internalNotes || undefined,
       customerVisibleNotes: form.customerVisibleNotes || undefined,
-    })).data,
-    onSuccess: async (response) => {
-      setCreated({ reference: response.data.reference, trackingUrl: response.trackingUrl });
+      })).data;
+      return { response, contact };
+    },
+    onSuccess: async ({ response, contact }) => {
+      setCreated({ ...contact, kind: response.data.kind, reference: response.data.reference, trackingUrl: response.trackingUrl });
       setForm(emptyIntake); setNewCustomer(emptyCustomer);
       await queryClient.invalidateQueries({ queryKey: ["digital-services"] });
       await queryClient.invalidateQueries({ queryKey: ["customers"] });
@@ -105,7 +111,7 @@ export function DigitalServicesPage() {
       ticket.assignedTechnician?.fullName ?? "Unassigned", new Date(ticket.createdAt).toLocaleDateString(),
     ])} />
     <FormDialog open={open} title={created ? "Digital intake complete" : "New digital intake"} busy={create.isPending} error={create.error ? apiMessage(create.error) : undefined} onClose={() => setOpen(false)} onSubmit={() => created ? setOpen(false) : create.mutate()} submitLabel={created ? "Done" : "Create ticket"} submitDisabled={!created && (!validCustomer || form.title.trim().length < 3 || form.requirements.trim().length < 3)}>
-      {created ? <><Alert severity="success">Ticket {created.reference} has been created. Notification delivery depends on customer consent and configured email/WhatsApp providers.</Alert><TrackingLink url={created.trackingUrl} /></> : <>
+      {created ? <><Alert severity="success">Ticket {created.reference} has been created. Automatic notification delivery depends on customer consent and configured providers; manual WhatsApp sharing is available below.</Alert><TrackingLink url={created.trackingUrl} /><WhatsAppShareButton customerName={created.customerName} phone={created.phone} whatsappPhone={created.whatsappPhone} reference={created.reference} trackingUrl={created.trackingUrl} serviceLabel={kinds[created.kind]} /></> : <>
         <TextField select label="Service type" value={form.kind} onChange={(event) => setForm({ ...form, kind: event.target.value as DigitalServiceKind })}>{Object.entries(kinds).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}</TextField>
         <Divider>Customer</Divider>
         <Stack direction="row" gap={1}><Button variant={customerMode === "existing" ? "contained" : "outlined"} onClick={() => setCustomerMode("existing")}>Select existing</Button><Button variant={customerMode === "new" ? "contained" : "outlined"} onClick={() => setCustomerMode("new")}>Register new</Button></Stack>
@@ -143,6 +149,7 @@ export function DigitalServiceDetailPage() {
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState("");
   const [visibility, setVisibility] = useState("INTERNAL");
+  const [showTracking, setShowTracking] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [edit, setEdit] = useState({ title: "", requirements: "", priority: "NORMAL", estimatedCompletionAt: "", internalNotes: "", customerVisibleNotes: "" });
   const query = useQuery({ queryKey: ["digital-service", id], queryFn: async () => (await api.get<ApiEnvelope<DigitalTicketDetail>>(`/digital-services/${id}`)).data.data });
@@ -152,7 +159,7 @@ export function DigitalServiceDetailPage() {
   const assign = useMutation({ mutationFn: () => api.post(`/digital-services/${id}/assign`, { technicianId: technicianId || null }), onSuccess: async () => { setAssignmentOpen(false); await refresh(); } });
   const addNote = useMutation({ mutationFn: () => api.post(`/digital-services/${id}/notes`, { body: note, visibility }), onSuccess: async () => { setNoteOpen(false); setNote(""); await refresh(); } });
   const update = useMutation({ mutationFn: () => api.patch(`/digital-services/${id}`, { ...edit, estimatedCompletionAt: edit.estimatedCompletionAt ? new Date(edit.estimatedCompletionAt).toISOString() : null, internalNotes: edit.internalNotes || null, customerVisibleNotes: edit.customerVisibleNotes || null }), onSuccess: async () => { setEditOpen(false); await refresh(); } });
-  const tracking = useMutation({ mutationFn: async () => (await api.get<ApiEnvelope<{ trackingUrl: string }>>(`/digital-services/${id}/tracking`)).data.data });
+  const tracking = useQuery({ queryKey: ["digital-service-tracking", id], queryFn: async () => (await api.get<ApiEnvelope<{ trackingUrl: string }>>(`/digital-services/${encodeURIComponent(id)}/tracking`)).data.data, enabled: Boolean(query.data && (admin || (user?.role === "TECHNICIAN" && query.data.assignedTechnician?.id === user.id))), retry: false });
   if (query.isLoading) return <LoadingBlock />;
   if (query.error || !query.data) return <ErrorBlock message={apiMessage(query.error)} />;
   const ticket = query.data;
@@ -178,7 +185,7 @@ export function DigitalServiceDetailPage() {
       </CardContent></Card></Grid>
       <Grid size={{ xs: 12, lg: 4 }}><Card><CardContent><Typography variant="h6" mb={2}>Project details</Typography><Stack spacing={2}>
         <KeyValue label="Customer" value={ticket.customer.fullName} /><KeyValue label="Assigned to" value={ticket.assignedTechnician?.fullName ?? "Unassigned"} /><KeyValue label="Priority" value={ticket.priority} /><KeyValue label="Received" value={new Date(ticket.createdAt).toLocaleDateString()} /><KeyValue label="Estimated delivery" value={ticket.estimatedCompletionAt ? new Date(ticket.estimatedCompletionAt).toLocaleString() : "Not scheduled"} />
-      </Stack>{canManage && <Button fullWidth startIcon={<ContentCopy />} sx={{ mt: 3 }} onClick={() => tracking.mutate()} disabled={tracking.isPending}>Show customer tracking link</Button>}{tracking.data && <Box mt={2}><TrackingLink url={tracking.data.trackingUrl} /></Box>}{tracking.error && <Alert severity="error" sx={{ mt: 2 }}>{apiMessage(tracking.error)}</Alert>}</CardContent></Card>
+      </Stack>{canManage && <><Button fullWidth startIcon={<ContentCopy />} sx={{ mt: 3 }} onClick={() => setShowTracking(true)} disabled={tracking.isPending || tracking.isError}>Show customer tracking link</Button><Box mt={2}><WhatsAppShareButton customerName={ticket.customer.fullName} phone={ticket.customer.phone} whatsappPhone={ticket.customer.whatsappPhone} reference={ticket.reference} trackingUrl={tracking.data?.trackingUrl} serviceLabel={kinds[ticket.kind]} disabled={tracking.isPending || tracking.isError} /></Box></>}{canManage && showTracking && tracking.data && <Box mt={2}><TrackingLink url={tracking.data.trackingUrl} /></Box>}{canManage && tracking.error && <Alert severity="error" sx={{ mt: 2 }}>{apiMessage(tracking.error)}</Alert>}</CardContent></Card>
       {(admin || user?.role === "CUSTOMER") && <Card sx={{ mt: 3 }}><CardContent><Typography variant="h6">Manual invoices</Typography><Typography variant="body2" color="text.secondary" mt={1} mb={2}>Charges are entered explicitly for agreed digital deliverables.</Typography>{ticket.invoices.map((invoice) => <Button fullWidth component={Link} to={`/invoices/${invoice.id}`} key={invoice.id} sx={{ justifyContent: "space-between" }}>{invoice.number}<StatusChip status={invoice.paymentStatus} /></Button>)}{!ticket.invoices.length && <Typography color="text.secondary">No invoice created.</Typography>}{admin && <Button variant="outlined" startIcon={<ReceiptLong />} component={Link} to={`/invoices?digitalTicketId=${encodeURIComponent(ticket.id)}`} sx={{ mt: 2 }}>Create manual invoice</Button>}</CardContent></Card>}
       </Grid>
     </Grid>

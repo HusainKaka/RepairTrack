@@ -16,6 +16,7 @@ const ticket = {
   statusHistory: [{ id: "history-id", toStatus: "DISCOVERY", createdAt: "2026-10-14T10:00:00.000Z", customerMessage: "We are reviewing your scope." }],
   notes: [{ id: "private-note", body: "PRIVATE INTERNAL NOTE", visibility: "INTERNAL", createdAt: "2026-10-14T10:00:00.000Z" }, { id: "public-note", body: "Your review is scheduled.", visibility: "CUSTOMER", createdAt: "2026-10-14T10:00:00.000Z" }], invoices: [],
 };
+const trackingUrl = `${window.location.origin}/track/digital/${"D".repeat(43)}`;
 
 function mount(element: React.ReactNode, path: string, route: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -24,7 +25,7 @@ function mount(element: React.ReactNode, path: string, route: string) {
 
 beforeEach(() => {
   vi.resetAllMocks(); mocks.role = "BUSINESS_ADMIN";
-  mocks.get.mockImplementation((path: string) => Promise.resolve({ data: { success: true, data: path === "/digital-services" ? [ticket] : path === "/customers" ? [ticket.customer] : path === "/businesses/technicians" ? [{ id: "assigned-user", fullName: "Assigned engineer", status: "ACTIVE" }] : ticket } }));
+  mocks.get.mockImplementation((path: string) => Promise.resolve({ data: { success: true, data: path === "/digital-services" ? [ticket] : path === "/customers" ? [ticket.customer] : path === "/businesses/technicians" ? [{ id: "assigned-user", fullName: "Assigned engineer", status: "ACTIVE" }] : path.endsWith("/tracking") ? { trackingUrl } : ticket } }));
 });
 afterEach(() => cleanup());
 
@@ -57,6 +58,8 @@ describe("digital service workflow", () => {
     expect(screen.queryByRole("button", { name: "Assign" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Show customer tracking link" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Create manual invoice" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Send to WhatsApp")).not.toBeInTheDocument();
+    expect(mocks.get.mock.calls.some(([path]) => typeof path === "string" && path.endsWith("/tracking"))).toBe(false);
   });
 
   it("limits technician stage changes to assigned tickets and omits invoice creation", async () => {
@@ -118,6 +121,66 @@ describe("digital service workflow", () => {
     fireEvent.click(consent); expect(consent).toBeChecked();
     fireEvent.change(screen.getByRole("textbox", { name: "WhatsApp phone" }), { target: { value: "+254700000002" } });
     expect(consent).not.toBeChecked();
+  });
+});
+
+describe("manual digital WhatsApp sharing", () => {
+  it.each([["WEBSITE", "Website"], ["SOFTWARE", "Software"], ["AI_AGENT", "AI agent"]])("retains the intake contact and %s service after form reset", async (kind, label) => {
+    const customer = { ...ticket.customer, whatsappPhone: "+254711222333" };
+    mocks.get.mockImplementation((path: string) => Promise.resolve({ data: { data: path === "/digital-services" ? [ticket] : path === "/customers" ? [customer] : [] } }));
+    mocks.post.mockResolvedValue({ data: { success: true, data: { ...ticket, kind }, trackingUrl } });
+    mount(<DigitalServicesPage />, "/digital-services", "/digital-services");
+    fireEvent.click(await screen.findByRole("button", { name: "New digital intake" }));
+    fireEvent.mouseDown(screen.getByLabelText("Service type"));
+    fireEvent.click(screen.getByRole("option", { name: label }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /^Customer/ }));
+    fireEvent.click(screen.getByRole("option", { name: "Example customer · +254700000000" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /^Project title/ }), { target: { value: "New project" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /^Requirements/ }), { target: { value: "Agreed digital deliverables" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+    const share = await screen.findByRole("link", { name: "Send to WhatsApp" });
+    const url = new URL(share.getAttribute("href")!);
+    expect(url.pathname).toBe("/254711222333");
+    expect(url.searchParams.get("text")).toContain("Example customer");
+    expect(url.searchParams.get("text")).toContain(label);
+    expect(url.searchParams.get("text")).toContain(ticket.reference);
+    expect(url.searchParams.get("text")).toContain(trackingUrl);
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+    expect(mocks.post.mock.calls[0][0]).toBe("/digital-services");
+  });
+
+  it("preserves newly entered contact for a digital intake draft", async () => {
+    mocks.post.mockResolvedValue({ data: { data: ticket, trackingUrl } });
+    mount(<DigitalServicesPage />, "/digital-services", "/digital-services");
+    fireEvent.click(await screen.findByRole("button", { name: "New digital intake" }));
+    fireEvent.click(screen.getByRole("button", { name: "Register new" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /^Customer or business name/ }), { target: { value: "New digital customer" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /^Phone/ }), { target: { value: "+254722000111" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "WhatsApp phone" }), { target: { value: "+254733000111" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /^Project title/ }), { target: { value: "New project" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /^Requirements/ }), { target: { value: "Agreed digital deliverables" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+    const share = await screen.findByRole("link", { name: "Send to WhatsApp" });
+    const url = new URL(share.getAttribute("href")!);
+    expect(url.pathname).toBe("/254733000111"); expect(url.searchParams.get("text")).toContain("New digital customer");
+  });
+
+  it.each(["BUSINESS_ADMIN", "TECHNICIAN"] as const)("prefetches the authorized URL for %s and does not send a notification", async (role) => {
+    mocks.role = role;
+    mount(<DigitalServiceDetailPage />, "/digital-services/ticket-id", "/digital-services/:id");
+    const share = await screen.findByRole("link", { name: "Send to WhatsApp" });
+    expect(new URL(share.getAttribute("href")!).searchParams.get("text")).toContain(trackingUrl);
+    expect(mocks.get).toHaveBeenCalledWith("/digital-services/ticket-id/tracking");
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it("blocks a draft with invalid customer contact", async () => {
+    mocks.get.mockImplementation((path: string) => Promise.resolve({ data: { data: path === "/businesses/technicians" ? [] : path.endsWith("/tracking") ? { trackingUrl } : { ...ticket, customer: { ...ticket.customer, phone: "bad", whatsappPhone: "123" } } } }));
+    mount(<DigitalServiceDetailPage />, "/digital-services/ticket-id", "/digital-services/:id");
+    await screen.findByText("Project requirements");
+    await waitFor(() => expect(mocks.get).toHaveBeenCalledWith("/digital-services/ticket-id/tracking"));
+    expect(screen.queryByRole("link", { name: "Send to WhatsApp" })).not.toBeInTheDocument();
+    expect(mocks.post).not.toHaveBeenCalled();
   });
 });
 

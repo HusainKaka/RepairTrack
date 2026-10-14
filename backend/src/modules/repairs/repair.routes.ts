@@ -4,7 +4,7 @@ import { z } from "zod";
 import { env } from "../../config/env.js";
 import { AppError, notFound } from "../../errors/app-error.js";
 import { writeAudit } from "../../lib/audit.js";
-import { createOpaqueToken, encryptPublicToken, hashToken } from "../../lib/crypto.js";
+import { createOpaqueToken, decryptPublicToken, encryptPublicToken, hashToken } from "../../lib/crypto.js";
 import { nextDocumentNumber } from "../../lib/identifiers.js";
 import { prisma } from "../../lib/prisma.js";
 import { customerView } from "../../lib/customer-view.js";
@@ -98,7 +98,7 @@ router.get("/", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN, RoleCode
   const customerRestriction = request.auth!.role === RoleCode.CUSTOMER ? { customer: { userId: request.auth!.userId } } : {};
   const repairs = await prisma.repair.findMany({
     where: { businessId, deletedAt: null, ...technicianRestriction(request), ...customerRestriction, ...(status ? { status } : {}), ...(search ? { OR: [{ reference: { contains: search, mode: "insensitive" } }, { customer: { fullName: { contains: search, mode: "insensitive" } } }, { device: { serialNumber: { contains: search, mode: "insensitive" } } }, { device: { imei: { contains: search } } }] } : {}) },
-    take: 100, orderBy: [{ priority: "desc" }, { createdAt: "desc" }], include: { customer: { select: { id: true, fullName: true, phone: true } }, device: { select: { id: true, type: true, brand: true, model: true, serialNumber: true } }, assignedTechnician: { select: { id: true, fullName: true } } }
+    take: 100, orderBy: [{ priority: "desc" }, { createdAt: "desc" }], include: { customer: { select: { id: true, fullName: true, phone: true, whatsappPhone: true } }, device: { select: { id: true, type: true, brand: true, model: true, serialNumber: true } }, assignedTechnician: { select: { id: true, fullName: true } } }
   });
   response.json({ success: true, data: request.auth!.role === RoleCode.CUSTOMER ? customerView(repairs) : repairs });
 });
@@ -139,6 +139,16 @@ router.get("/:id", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN, RoleC
     return;
   }
   response.json({ success: true, data: repair });
+});
+
+router.get("/:id/tracking", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN), validate(z.object({ id: z.uuid() }), "params"), async (request, response) => {
+  const repair = await prisma.repair.findFirst({ where: { id: routeParam(request.params.id), businessId: requireBusiness(request), deletedAt: null, ...technicianRestriction(request) }, select: { publicTrackingTokenEncrypted: true } });
+  if (!repair) throw notFound("Repair");
+  if (!repair.publicTrackingTokenEncrypted) throw new AppError(409, "TRACKING_LINK_UNAVAILABLE", "The tracking link is unavailable for this legacy repair. Contact the administrator.");
+  let trackingToken: string;
+  try { trackingToken = decryptPublicToken(repair.publicTrackingTokenEncrypted); } catch { throw new AppError(409, "TRACKING_LINK_UNAVAILABLE", "The tracking link is unavailable. Contact the administrator."); }
+  if (!/^[A-Za-z0-9_-]{43}$/.test(trackingToken)) throw new AppError(409, "TRACKING_LINK_UNAVAILABLE", "The tracking link is unavailable. Contact the administrator.");
+  response.json({ success: true, data: { trackingUrl: `${env.PUBLIC_WEB_URL.replace(/\/$/, "")}/track/${encodeURIComponent(trackingToken)}` } });
 });
 
 router.patch("/:id", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN), validate(repairInputSchema.omit({ customerId: true, newCustomer: true, deviceId: true, newDevice: true, assignedTechnicianId: true }).partial()), async (request, response) => {

@@ -18,7 +18,17 @@ Business admins upload a logo in **Settings → Business profile**. PNG, JPEG, W
 
 KRA/eTIMS is off by default. **Settings → KRA / eTIMS controls** hides KRA fields/status/references on invoices and receipts until setup is completed and the admin enables it. Existing tax calculations and accounting records are retained.
 
-## WhatsApp setup
+## Manual WhatsApp sharing — no provider setup
+
+Staff can choose **Send to WhatsApp** after repair or digital intake and from a permitted ticket detail page. The customer's recorded WhatsApp number takes precedence over their ordinary phone. Kenyan mobile numbers beginning with 07 or 01 are converted to international format; other numbers should include their country code.
+
+The button opens `wa.me` with a draft containing the service/ticket reference and private tracking link. Review the recipient, obtain appropriate customer permission, and press **Send inside WhatsApp**. Opening the draft does not send a message or change the automatic notification delivery status. This manual action needs neither Meta credentials nor an approved API template.
+
+On an issued, partially paid or paid invoice, business admins can use the same button to prepare a private invoice PDF link and open a WhatsApp draft in one click. Pop-ups must be allowed for this action. The message contains the invoice number, total and PDF link; an associated valid ticket tracking link is included when available. The signed PDF link expires after seven days and is rejected if the invoice is voided, cancelled or deleted, or its business is suspended. Customers do not need a RepairTrack account to open this particular link. Treat it as confidential: anyone who receives it can read the invoice until expiry or ineligibility. There is no per-link revocation interface; do not forward links or place them in public logs/issues.
+
+Normal invoice APIs and downloads remain authenticated and tenant scoped. Draft invoices cannot be shared. Invalid customer numbers or unavailable links disable sharing; failed preparation closes the reserved tab without recording delivery. No real customer messages are sent during automated tests.
+
+## Optional automatic WhatsApp setup
 
 Record the customer's explicit WhatsApp permission in their profile or new-customer intake; selecting WhatsApp as a preference alone is not consent. Changing the recipient clears consent. Consented customers receive an automatic intake ticket reference and private tracking link for repairs and all digital categories, even when email is their preferred ongoing channel. Ongoing WhatsApp status updates follow their channel preference.
 
@@ -32,4 +42,4 @@ Admins can inspect recent delivery attempts and retry WhatsApp under Notificatio
 
 ## Project tracking
 
-[GitHub kanban board](https://github.com/users/HusainKaka/projects/6) tracks issues [#5](https://github.com/HusainKaka/RepairTrack/issues/5)–[#10](https://github.com/HusainKaka/RepairTrack/issues/10). WhatsApp live-provider setup remains an external prerequisite. Security tests and dependency scans reduce risk but are not a guarantee of vulnerability-free operation.
+[GitHub kanban board](https://github.com/users/HusainKaka/projects/6) includes the core project lifecycle, existing upgrade issues and current enhancements. See [the retrospective manifest](project-kanban-retrospective.md) for source evidence and honest completion boundaries. Automatic WhatsApp live-provider setup remains optional and external; manual sharing works independently. Security tests and dependency scans reduce risk but are not a guarantee of vulnerability-free operation.

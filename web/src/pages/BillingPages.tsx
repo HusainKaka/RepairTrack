@@ -40,6 +40,7 @@ import { EmptyState, ErrorBlock, LoadingBlock } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { StatusChip } from "../components/StatusChip";
 import { InvoiceManagementPanel, invoiceAmountPreview } from "../components/InvoiceManagementPanel";
+import { WhatsAppShareButton } from "../components/WhatsAppShareButton";
 import type { ApiEnvelope, Customer, DigitalTicket, Invoice, Repair } from "../types";
 
 interface InvoiceLine {
@@ -463,6 +464,10 @@ export function InvoiceDetailPage() {
     mutationFn: () => api.post(`/invoices/${id}/email`),
     onSuccess: () => setNotice("The invoice was accepted for email delivery."),
   });
+  const prepareWhatsAppInvoice = async () => {
+    const result = await api.post<ApiEnvelope<{ invoiceUrl: string; expiresAt: string; trackingUrl?: string }>>(`/invoices/${id}/share-link`);
+    return { invoiceUrl: result.data.data.invoiceUrl, trackingUrl: result.data.data.trackingUrl };
+  };
   const payment = useMutation({
     mutationFn: () =>
       api.post(`/invoices/${id}/payments`, {
@@ -514,6 +519,18 @@ export function InvoiceDetailPage() {
               <Button variant="outlined" onClick={() => issue.mutate()}>
                 Issue invoice
               </Button>
+            )}
+            {user?.role === "BUSINESS_ADMIN" && ["ISSUED", "PARTIALLY_PAID", "PAID"].includes(invoice.status) && (
+              <WhatsAppShareButton
+                customerName={invoice.customer.fullName}
+                phone={invoice.customer.phone}
+                whatsappPhone={invoice.customer.whatsappPhone}
+                reference={invoice.number}
+                invoiceTotal={invoice.total}
+                currency={invoice.business.currency}
+                serviceLabel={invoice.digitalTicket ? invoice.digitalTicket.kind === "WEBSITE" ? "Website" : invoice.digitalTicket.kind === "SOFTWARE" ? "Software" : "AI agent" : invoice.repair ? "Repair" : "Invoice"}
+                prepareShare={prepareWhatsAppInvoice}
+              />
             )}
             {user?.role === "BUSINESS_ADMIN" &&
               invoice.status !== "DRAFT" &&

@@ -3,9 +3,9 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), role: "BUSINESS_ADMIN" }));
 vi.mock("../api/client", () => ({ api: { get: mocks.get, post: mocks.post }, apiMessage: () => "Request unavailable" }));
-vi.mock("../auth/AuthProvider", () => ({ useAuth: () => ({ user: { role: "BUSINESS_ADMIN" } }) }));
+vi.mock("../auth/AuthProvider", () => ({ useAuth: () => ({ user: { role: mocks.role } }) }));
 import { InvoiceDetailPage, InvoicesPage } from "./BillingPages";
 import { invoiceAmountPreview } from "../components/InvoiceManagementPanel";
 
@@ -24,9 +24,10 @@ function mount(element: React.ReactNode, path: string, route: string) {
 }
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.role = "BUSINESS_ADMIN";
   mocks.get.mockImplementation((path: string) => Promise.resolve({ data: { data: path === "/invoices" ? [] : path === "/customers" ? [customer] : path === "/digital-services" ? [digitalTicket] : path === "/repairs" ? [] : invoice } }));
 });
-afterEach(() => cleanup());
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("digital manual billing and KRA feature gate", () => {
   it("previews discounted tax accurately and blocks excessive discounts or quantities", async () => {
@@ -132,5 +133,72 @@ describe("invoice monetary precision and storage boundaries", () => {
     expect(invoiceAmountPreview([{ quantity: 10_000, unitPrice: 9_999_999_999.99, taxRate: 0, discount: 0 }]).valid).toBe(false);
     expect(invoiceAmountPreview([{ quantity: 1, unitPrice: 5_000_000_000, taxRate: 0, discount: 0 }, { quantity: 1, unitPrice: 5_000_000_000, taxRate: 0, discount: 0 }]).valid).toBe(false);
     expect(invoiceAmountPreview(Array.from({ length: 101 }, () => line)).valid).toBe(false);
+  });
+});
+
+describe("one-click private invoice sharing", () => {
+  const sharedPdfUrl = () => `${window.location.origin}/api/v1/invoices/shared/fixtureHeader.fixtureClaims.fixtureSignature`;
+  const trackingUrl = () => `${window.location.origin}/track/digital/${"x".repeat(43)}`;
+  function popupWindow() {
+    const popup = { document: document.implementation.createHTMLDocument(), opener: window, closed: false, location: { replace: vi.fn() }, close: vi.fn() };
+    vi.spyOn(window, "open").mockReturnValue(popup as unknown as Window);
+    return popup;
+  }
+
+  it("creates a private link only after the admin clicks and opens the customer's WhatsApp draft", async () => {
+    const popup = popupWindow();
+    mocks.get.mockResolvedValue({ data: { data: { ...invoice, customer: { ...customer, whatsappPhone: "+254711111111" } } } });
+    mocks.post.mockResolvedValue({ data: { data: { invoiceUrl: sharedPdfUrl(), trackingUrl: trackingUrl(), expiresAt: "2026-10-21T09:00:00.000Z" } } });
+    mount(<InvoiceDetailPage />, "/invoices/view-id", "/invoices/:id");
+    const button = await screen.findByRole("button", { name: "Send to WhatsApp" });
+    expect(mocks.post).not.toHaveBeenCalled();
+    fireEvent.click(button);
+    await waitFor(() => expect(popup.location.replace).toHaveBeenCalled());
+    expect(mocks.post).toHaveBeenCalledWith("/invoices/view-id/share-link");
+    const destination = new URL(popup.location.replace.mock.calls[0][0] as string);
+    expect(destination.origin).toBe("https://wa.me");
+    expect(destination.pathname).toBe("/254711111111");
+    const message = destination.searchParams.get("text");
+    expect(message).toContain("Invoice: INV-2026-000001");
+    expect(message).toContain("Total: KES 1000.00");
+    expect(message).toContain(sharedPdfUrl());
+    expect(message).toContain(trackingUrl());
+    expect(message).toContain("expires in 7 days");
+    expect(popup.opener).toBeNull();
+    expect(screen.queryByText(/successfully sent|WhatsApp sent/i)).not.toBeInTheDocument();
+  });
+
+  it.each(["DRAFT", "VOID", "CANCELLED"])("does not offer public invoice sharing for %s", async (status) => {
+    mocks.get.mockResolvedValue({ data: { data: { ...invoice, status } } });
+    mount(<InvoiceDetailPage />, "/invoices/view-id", "/invoices/:id");
+    await screen.findByText("Example business");
+    expect(screen.queryByRole("button", { name: "Send to WhatsApp" })).not.toBeInTheDocument();
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it("keeps public sharing controls administrator-only", async () => {
+    mocks.role = "CUSTOMER";
+    mount(<InvoiceDetailPage />, "/invoices/view-id", "/invoices/:id");
+    await screen.findByText("Example business");
+    expect(screen.queryByRole("button", { name: "Send to WhatsApp" })).not.toBeInTheDocument();
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it("disables sharing when the recorded recipient is invalid", async () => {
+    mocks.get.mockResolvedValue({ data: { data: { ...invoice, customer: { ...customer, phone: "not a number" } } } });
+    mount(<InvoiceDetailPage />, "/invoices/view-id", "/invoices/:id");
+    expect(await screen.findByRole("button", { name: "Send to WhatsApp" })).toBeDisabled();
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it("shows safe failure feedback and closes the reserved tab without claiming delivery", async () => {
+    const popup = popupWindow();
+    mocks.post.mockRejectedValue(new Error("private provider details"));
+    mount(<InvoiceDetailPage />, "/invoices/view-id", "/invoices/:id");
+    fireEvent.click(await screen.findByRole("button", { name: "Send to WhatsApp" }));
+    await screen.findByText(/The sharing link could not be prepared. No message was sent./);
+    expect(popup.close).toHaveBeenCalled();
+    expect(popup.location.replace).not.toHaveBeenCalled();
+    expect(screen.queryByText("private provider details")).not.toBeInTheDocument();
   });
 });

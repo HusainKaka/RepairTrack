@@ -1,9 +1,11 @@
 import { InventoryTransactionType, InvoiceItemType, InvoiceStatus, KraEtimsStatus, PaymentMethod, PaymentStatus, RoleCode, type Prisma } from "../../generated/prisma/index.js";
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { env } from "../../config/env.js";
 import { AppError, notFound } from "../../errors/app-error.js";
 import { writeAudit } from "../../lib/audit.js";
+import { decryptPublicToken } from "../../lib/crypto.js";
 import { nextDocumentNumber } from "../../lib/identifiers.js";
 import { mailProvider } from "../../lib/mail.js";
 import { renderInvoicePdf, renderReceiptPdf } from "../../lib/pdf.js";
@@ -19,8 +21,34 @@ import { defaultLabourItem, digitalInvoiceItemAllowed, invoiceCanBeEdited, invoi
 import { getInvoiceForAccess, recalculateInvoice } from "./invoice.service.js";
 import { submitInvoiceToEtims } from "./kra-etims.service.js";
 import { validateManualPaymentEvidence } from "./payment-provider.js";
+import { createInvoiceShareToken, invoiceShareUrl, verifyInvoiceShareToken } from "./invoice-share.js";
 
 const router = Router();
+const shareableStatuses = [InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.PAID];
+const publicShareLimiter = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: "draft-8", legacyHeaders: false });
+const shareCreationLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 30, standardHeaders: "draft-8", legacyHeaders: false,
+  keyGenerator: (request) => `${request.auth!.businessId}:${request.auth!.userId}`,
+  message: { success: false, code: "SHARE_LINK_RATE_LIMIT", message: "Too many invoice sharing links. Please wait and try again." },
+});
+
+// This is the only anonymous invoice route; normal invoices remain behind authenticate.
+router.get("/shared/:token", (_request, response, next) => {
+  response.setHeader("Cache-Control", "no-store");
+  response.setHeader("Referrer-Policy", "no-referrer");
+  response.setHeader("X-Robots-Tag", "noindex, nofollow, noarchive");
+  next();
+}, publicShareLimiter, validate(z.object({ token: z.string().min(16).max(1200) }), "params"), async (request, response) => {
+  const claims = verifyInvoiceShareToken(routeParam(request.params.token));
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: claims.invoiceId, businessId: claims.businessId, deletedAt: null, status: { in: shareableStatuses }, business: { status: "ACTIVE", deletedAt: null } },
+    include: { business: { include: { taxSettings: { select: { etimsEnabled: true } } } }, customer: true, repair: { include: { device: true } }, digitalTicket: { select: { reference: true, title: true } }, items: true },
+  });
+  if (!invoice) throw notFound("Shared invoice");
+  const pdf = await renderInvoicePdf(invoice, invoiceShareUrl(routeParam(request.params.token)));
+  response.setHeader("content-type", "application/pdf");
+  response.setHeader("content-disposition", `attachment; filename="${invoice.number}.pdf"`);
+  response.send(pdf);
+});
 router.use(authenticate);
 
 const itemSchema = z.object({
@@ -110,6 +138,29 @@ router.get("/:id", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.CUSTOMER), async 
   if (!invoice) throw notFound("Invoice");
   const display = invoiceDisplayView(invoice);
   response.json({ success: true, data: request.auth!.role === RoleCode.CUSTOMER ? customerView(display) : display });
+});
+
+router.post("/:id/share-link", authorize(RoleCode.BUSINESS_ADMIN), shareCreationLimiter, validate(z.object({ id: z.uuid() }), "params"), async (request, response) => {
+  const businessId = requireBusiness(request);
+  const invoice = await prisma.invoice.findFirst({
+    where: { id: routeParam(request.params.id), businessId, deletedAt: null, status: { in: shareableStatuses }, business: { status: "ACTIVE", deletedAt: null } },
+    select: { id: true, businessId: true, customerId: true,
+      repair: { select: { businessId: true, customerId: true, deletedAt: true, publicTrackingTokenEncrypted: true } },
+      digitalTicket: { select: { businessId: true, customerId: true, deletedAt: true, publicTrackingTokenEncrypted: true } },
+    },
+  });
+  if (!invoice) throw notFound("Issued invoice");
+  const share = createInvoiceShareToken(invoice.id, businessId);
+  const associated = invoice.digitalTicket ?? invoice.repair;
+  let trackingUrl: string | undefined;
+  if (associated?.publicTrackingTokenEncrypted && !associated.deletedAt && associated.businessId === businessId && associated.customerId === invoice.customerId) {
+    try {
+      const trackingToken = decryptPublicToken(associated.publicTrackingTokenEncrypted);
+      if (/^[A-Za-z0-9_-]{43}$/.test(trackingToken)) trackingUrl = `${env.PUBLIC_WEB_URL.replace(/\/$/, "")}/track/${invoice.digitalTicket ? "digital/" : ""}${encodeURIComponent(trackingToken)}`;
+    } catch { /* The PDF remains shareable when a legacy tracking token needs repair. */ }
+  }
+  await writeAudit(prisma, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "INVOICE_SHARE_LINK_CREATED", resourceType: "invoice", resourceId: invoice.id, metadata: { expiresAt: share.expiresAt } });
+  response.status(201).json({ success: true, data: { invoiceUrl: invoiceShareUrl(share.token), expiresAt: share.expiresAt, trackingUrl } });
 });
 
 router.patch("/:id", authorize(RoleCode.BUSINESS_ADMIN), validate(z.object({ dueAt: z.iso.datetime().nullable().optional(), invoiceDiscount: z.number().nonnegative().optional(), terms: z.string().trim().max(2000).nullable().optional(), notes: z.string().trim().max(2000).nullable().optional() })), async (request, response) => {

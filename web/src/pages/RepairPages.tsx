@@ -36,6 +36,7 @@ import {
 import { EmptyState, ErrorBlock, LoadingBlock } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { StatusChip } from "../components/StatusChip";
+import { WhatsAppShareButton } from "../components/WhatsAppShareButton";
 import type {
   ApiEnvelope,
   Customer,
@@ -103,6 +104,7 @@ export function RepairsPage() {
   const [newCustomer, setNewCustomer] = useState(emptyNewCustomer);
   const [newDevice, setNewDevice] = useState(emptyNewDevice);
   const [trackingUrl, setTrackingUrl] = useState("");
+  const [intakeCustomer, setIntakeCustomer] = useState<{ fullName: string; phone?: string; whatsappPhone?: string; reference: string } | null>(null);
   const repairs = useQuery({
     queryKey: ["repairs", status],
     queryFn: async () =>
@@ -132,8 +134,10 @@ export function RepairsPage() {
     enabled: user?.role === "BUSINESS_ADMIN",
   });
   const create = useMutation({
-    mutationFn: async () =>
-      (
+    mutationFn: async () => {
+      const selectedCustomer = customerMode === "new" ? newCustomer : customers.data?.find((customer) => customer.id === form.customerId);
+      const contact = { fullName: selectedCustomer?.fullName ?? "", phone: selectedCustomer?.phone, whatsappPhone: selectedCustomer?.whatsappPhone };
+      const data = (
         await api.post<ApiEnvelope<Repair & { trackingUrl: string }>>(
           "/repairs",
           {
@@ -155,9 +159,12 @@ export function RepairsPage() {
             notificationPreferenceOverride: form.notificationPreferenceOverride || undefined,
           },
         )
-      ).data.data,
-    onSuccess: async (data) => {
+      ).data.data;
+      return { data, contact };
+    },
+    onSuccess: async ({ data, contact }) => {
       setTrackingUrl(data.trackingUrl);
+      setIntakeCustomer({ ...contact, reference: data.reference });
       setForm(emptyRepair);
       setNewCustomer(emptyNewCustomer);
       setNewDevice(emptyNewDevice);
@@ -230,6 +237,7 @@ export function RepairsPage() {
               label="New repair intake"
               onClick={() => {
                 setTrackingUrl("");
+                setIntakeCustomer(null);
                 setOpen(true);
               }}
             />
@@ -283,6 +291,7 @@ export function RepairsPage() {
         submitLabel={trackingUrl ? "Done" : "Create repair"}
       >
         {trackingUrl ? (
+          <>
           <Alert
             severity="success"
             action={
@@ -305,6 +314,8 @@ export function RepairsPage() {
               {trackingUrl}
             </Typography>
           </Alert>
+          {intakeCustomer && <WhatsAppShareButton customerName={intakeCustomer.fullName} phone={intakeCustomer.phone} whatsappPhone={intakeCustomer.whatsappPhone} reference={intakeCustomer.reference} trackingUrl={trackingUrl} serviceLabel="Repair" />}
+          </>
         ) : (
           <>
             <Divider>Customer</Divider>
@@ -484,6 +495,12 @@ export function RepairDetailPage() {
     queryFn: async () =>
       (await api.get<ApiEnvelope<RepairDetail>>(`/repairs/${id}`)).data.data,
   });
+  const tracking = useQuery({
+    queryKey: ["repair-tracking", id],
+    queryFn: async () => (await api.get<ApiEnvelope<{ trackingUrl: string }>>(`/repairs/${encodeURIComponent(id)}/tracking`)).data.data,
+    enabled: Boolean(query.data && (user?.role === "BUSINESS_ADMIN" || (user?.role === "TECHNICIAN" && query.data.assignedTechnician?.id === user.id))),
+    retry: false,
+  });
   const inventory = useQuery({
     queryKey: ["inventory"],
     queryFn: async () =>
@@ -643,6 +660,10 @@ export function RepairDetailPage() {
                   />
                 </Grid>
               </Grid>
+              {canEdit && <Box mt={3}>
+                <WhatsAppShareButton customerName={repair.customer.fullName} phone={repair.customer.phone} whatsappPhone={repair.customer.whatsappPhone} reference={repair.reference} trackingUrl={tracking.data?.trackingUrl} serviceLabel="Repair" disabled={tracking.isPending || tracking.isError} />
+                {tracking.error && <Alert severity="error" sx={{ mt: 1 }}>The private tracking link could not be loaded. {apiMessage(tracking.error)}</Alert>}
+              </Box>}
             </CardContent>
           </Card>
           <Card sx={{ mt: 3 }}>

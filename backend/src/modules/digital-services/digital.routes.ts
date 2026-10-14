@@ -81,7 +81,7 @@ router.get("/", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN, RoleCode
     where: { businessId: requireBusiness(request), deletedAt: null, ...digitalAccessRestriction(request.auth!.role, request.auth!.userId), ...(kind ? { kind } : {}), ...(status ? { status } : {}),
       ...(search ? { OR: [{ reference: { contains: search, mode: "insensitive" } }, { title: { contains: search, mode: "insensitive" } }, { customer: { fullName: { contains: search, mode: "insensitive" } } }] } : {}) },
     orderBy: [{ createdAt: "desc" }], take: 100,
-    include: { customer: { select: { id: true, fullName: true, phone: true } }, assignedTechnician: { select: { id: true, fullName: true } } },
+    include: { customer: { select: { id: true, fullName: true, phone: true, whatsappPhone: true } }, assignedTechnician: { select: { id: true, fullName: true } } },
   });
   response.json({ success: true, data: digitalTicketView(tickets, request.auth!.role === RoleCode.CUSTOMER) });
 });
@@ -117,7 +117,7 @@ router.get("/:id", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN, RoleC
   const customer = request.auth!.role === RoleCode.CUSTOMER;
   const ticket = await prisma.digitalTicket.findFirst({
     where: { id: routeParam(request.params.id), businessId: requireBusiness(request), deletedAt: null, ...digitalAccessRestriction(request.auth!.role, request.auth!.userId) },
-    include: { customer: { select: { id: true, fullName: true, phone: true, email: true } }, assignedTechnician: { select: { id: true, fullName: true } },
+    include: { customer: { select: { id: true, fullName: true, phone: true, email: true, whatsappPhone: true } }, assignedTechnician: { select: { id: true, fullName: true } },
       statusHistory: { select: timelineSelect, orderBy: { createdAt: "asc" }, take: 200 },
       notes: { ...(customer ? { where: { visibility: NoteVisibility.CUSTOMER } } : {}), include: { author: { select: { fullName: true } } }, orderBy: { createdAt: "desc" }, take: 100 },
       ...(request.auth!.role !== RoleCode.TECHNICIAN ? { invoices: { where: activeInvoices, select: { id: true, ...publicInvoiceSelect }, orderBy: { createdAt: "desc" }, take: 20 } } : {}),

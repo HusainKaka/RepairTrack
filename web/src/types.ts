@@ -24,7 +24,7 @@ export interface Repair {
   estimatedCompletionAt?: string;
   estimatedCost?: string;
   approvalVersion?: number;
-  customer: { id: string; fullName: string; phone: string };
+  customer: { id: string; fullName: string; phone: string; whatsappPhone?: string | null };
   device: {
     id: string;
     type: string;
@@ -113,7 +113,7 @@ export interface DigitalTicket {
   estimatedCompletionAt?: string | null;
   deliveredAt?: string | null;
   customerVisibleNotes?: string | null;
-  customer: { id: string; fullName: string; phone?: string; email?: string };
+  customer: { id: string; fullName: string; phone?: string; email?: string; whatsappPhone?: string | null };
   assignedTechnician?: { id: string; fullName: string } | null;
 }
 
