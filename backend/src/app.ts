@@ -11,6 +11,7 @@ import { authRouter } from "./modules/auth/auth.routes.js";
 import { businessRouter } from "./modules/businesses/business.routes.js";
 import { customerRouter } from "./modules/customers/customer.routes.js";
 import { deviceRouter } from "./modules/devices/device.routes.js";
+import { digitalRouter } from "./modules/digital-services/digital.routes.js";
 import { expenseRouter } from "./modules/expenses/expense.routes.js";
 import { inventoryRouter } from "./modules/inventory/inventory.routes.js";
 import { invoiceRouter } from "./modules/invoices/invoice.routes.js";
@@ -27,6 +28,7 @@ export function createApp() {
   app.use(requestContext);
   app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] } }, crossOriginResourcePolicy: { policy: "same-site" } }));
   app.use(cors({ origin: env.WEB_ORIGIN, credentials: true, methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], allowedHeaders: ["authorization", "content-type", "x-request-id"] }));
+  app.use("/api/v1/businesses/profile/logo", express.json({ limit: "3mb" }));
   app.use(express.json({ limit: "1mb", verify: (request, _response, buffer) => { (request as unknown as Express.Request).rawBody = Buffer.from(buffer); } }));
   app.use(express.urlencoded({ extended: false, limit: "100kb" }));
   app.use(cookieParser());
@@ -45,6 +47,7 @@ export function createApp() {
   app.use("/api/v1/customers", customerRouter);
   app.use("/api/v1/devices", deviceRouter);
   app.use("/api/v1/repairs", repairRouter);
+  app.use("/api/v1/digital-services", digitalRouter);
   app.use("/api/v1/inventory", inventoryRouter);
   app.use("/api/v1/expenses", expenseRouter);
   app.use("/api/v1/invoices", invoiceRouter);

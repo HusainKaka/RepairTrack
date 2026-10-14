@@ -8,6 +8,7 @@ import { customerView } from "../../lib/customer-view.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import { authorize, requireBusiness } from "../../middleware/authorize.js";
 import { routeParam, validate } from "../../middleware/validate.js";
+import { whatsappConsentUpdate } from "./whatsapp-consent.js";
 
 const router = Router();
 router.use(authenticate);
@@ -15,7 +16,8 @@ router.use(authenticate);
 const customerSchema = z.object({
   fullName: z.string().trim().min(2).max(120), email: z.email().optional(), phone: z.string().trim().min(7).max(30),
   alternativePhone: z.string().trim().max(30).optional(), whatsappPhone: z.string().trim().min(7).max(30).optional(), address: z.string().trim().max(300).optional(), notes: z.string().trim().max(2000).optional(),
-  customerType: z.enum(["INDIVIDUAL", "BUSINESS"]).default("INDIVIDUAL"), preferredCommunication: z.enum(["EMAIL", "WHATSAPP"]).default("EMAIL"),
+  customerType: z.enum(["INDIVIDUAL", "BUSINESS"]).optional(), preferredCommunication: z.enum(["EMAIL", "WHATSAPP"]).optional(),
+  whatsappOptIn: z.boolean().optional(),
   kraPin: z.string().trim().regex(/^[AP]\d{9}[A-Z]$/i, "Enter a valid KRA PIN such as A123456789B").optional()
 });
 
@@ -28,7 +30,7 @@ router.get("/", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN), async (
 
 router.post("/", authorize(RoleCode.BUSINESS_ADMIN), validate(customerSchema), async (request, response) => {
   const businessId = requireBusiness(request);
-  const customer = await prisma.customer.create({ data: { ...request.body, email: request.body.email?.toLowerCase(), kraPin: request.body.kraPin?.toUpperCase(), businessId } });
+  const customer = await prisma.customer.create({ data: { ...request.body, ...whatsappConsentUpdate(request.body), email: request.body.email?.toLowerCase(), kraPin: request.body.kraPin?.toUpperCase(), businessId } });
   await writeAudit(prisma, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "CUSTOMER_CREATED", resourceType: "customer", resourceId: customer.id });
   response.status(201).json({ success: true, data: customer });
 });
@@ -44,8 +46,9 @@ router.patch("/:id", authorize(RoleCode.BUSINESS_ADMIN), validate(customerSchema
   const businessId = requireBusiness(request);
   const existing = await prisma.customer.findFirst({ where: { id: routeParam(request.params.id), businessId, deletedAt: null } });
   if (!existing) throw notFound("Customer");
-  const customer = await prisma.customer.update({ where: { id: existing.id }, data: { ...request.body, email: request.body.email?.toLowerCase(), kraPin: request.body.kraPin?.toUpperCase() } });
-  await writeAudit(prisma, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "CUSTOMER_UPDATED", resourceType: "customer", resourceId: customer.id });
+  const consent = whatsappConsentUpdate(request.body, existing);
+  const customer = await prisma.customer.update({ where: { id: existing.id }, data: { ...request.body, ...consent, email: request.body.email?.toLowerCase(), kraPin: request.body.kraPin?.toUpperCase() } });
+  await writeAudit(prisma, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "CUSTOMER_UPDATED", resourceType: "customer", resourceId: customer.id, metadata: { whatsappConsentChanged: consent.whatsappOptIn !== undefined, whatsappOptIn: customer.whatsappOptIn } });
   response.json({ success: true, data: customer });
 });
 

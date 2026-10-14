@@ -1,5 +1,6 @@
 import AssessmentOutlined from "@mui/icons-material/AssessmentOutlined";
 import BuildOutlined from "@mui/icons-material/BuildOutlined";
+import CodeOutlined from "@mui/icons-material/CodeOutlined";
 import BusinessOutlined from "@mui/icons-material/BusinessOutlined";
 import ChevronLeft from "@mui/icons-material/ChevronLeft";
 import DashboardOutlined from "@mui/icons-material/DashboardOutlined";
@@ -69,6 +70,12 @@ const nav: NavItem[] = [
     label: "Repairs",
     to: "/repairs",
     icon: <BuildOutlined />,
+    roles: ["BUSINESS_ADMIN", "TECHNICIAN", "CUSTOMER"],
+  },
+  {
+    label: "Digital solutions",
+    to: "/digital-services",
+    icon: <CodeOutlined />,
     roles: ["BUSINESS_ADMIN", "TECHNICIAN", "CUSTOMER"],
   },
   {

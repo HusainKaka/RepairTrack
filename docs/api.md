@@ -36,7 +36,6 @@ Role abbreviations: SA = super admin, BA = business admin, T = technician, C = c
 | `GET /ready` | Public | PostgreSQL readiness probe |
 | `POST /auth/signup` | Public | Create a customer account within a business |
 | `POST /auth/login` | Public | Email/password sign-in with credential rate limit |
-| `POST /auth/google` | Public | Verify a Google ID token against the configured audience |
 | `POST /auth/refresh` | Refresh cookie | Rotate refresh session and issue an access token |
 | `POST /auth/logout` | Refresh cookie | Revoke current session and clear cookie |
 | `POST /auth/verify-email` | Public | Consume a hashed, expiring verification token |

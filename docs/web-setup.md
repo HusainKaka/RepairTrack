@@ -6,12 +6,11 @@ Copy `web/.env.example` to `web/.env`:
 
 ```dotenv
 VITE_API_URL=http://localhost:4000/api/v1
-VITE_GOOGLE_CLIENT_ID=
 ```
 
-`VITE_*` values are embedded at build time and are public. Put only the Google web client ID here—never an OAuth client secret, service-account key, SMTP password, or backend secret.
+`VITE_*` values are embedded at build time and are public. Never put a service-account key, SMTP password, or backend secret here.
 
-The backend `WEB_ORIGIN` must exactly match the browser origin, including scheme and port. The backend `GOOGLE_WEB_CLIENT_ID` and web `VITE_GOOGLE_CLIENT_ID` must identify the same web OAuth client.
+The backend `WEB_ORIGIN` must exactly match the browser origin, including scheme and port. Sign-in uses email and password; no Google client configuration is needed.
 
 ## Run and build
 

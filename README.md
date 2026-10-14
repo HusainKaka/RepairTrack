@@ -36,7 +36,7 @@ See [architecture](docs/architecture.md), [security](docs/security.md), and [dat
 - Android Studio with JDK 17, Android SDK 36, and platform tools
 - Git
 
-External credentials are optional for local core workflows. Google Sign-In, SMTP delivery, Firebase push, and live M-Pesa require provider configuration and never report fake success when unconfigured.
+External credentials are optional for local core workflows. SMTP delivery, Firebase push, WhatsApp and live M-Pesa require provider configuration and never report fake success when unconfigured. Sign-in uses email and password; existing Google-only accounts can use Forgot password to set a password.
 
 ## Local quick start
 
@@ -110,7 +110,7 @@ Backend required values:
 | `PUBLIC_WEB_URL` | Public links used in mail and QR output |
 | `TRUST_PROXY` | `0` locally; set only for the known reverse-proxy depth |
 
-Optional integrations use `GOOGLE_WEB_CLIENT_ID`, `SMTP_*`, `FCM_*`, `MPESA_*`, `WHATSAPP_*`, `KRA_ETIMS_*`, and `PAYMENT_GATEWAY_*`. All keys are described in `backend/.env.example` and [deployment](docs/deployment.md). Web compile-time values include `VITE_GOOGLE_CLIENT_ID` and the development-only `VITE_API_URL`. Production browser API requests use `/api/v1` through the proxy configured in `web/vercel.json`.
+Optional integrations use `SMTP_*`, `FCM_*`, `MPESA_*`, `WHATSAPP_*`, `KRA_ETIMS_*`, and `PAYMENT_GATEWAY_*`. All keys are described in `backend/.env.example` and [deployment](docs/deployment.md). The development-only web value is `VITE_API_URL`. Production browser API requests use `/api/v1` through the proxy configured in `web/vercel.json`.
 
 ## Android application
 
@@ -145,14 +145,14 @@ pnpm --filter @repairtrack/backend prisma:validate
 cd android && ./gradlew clean assembleDebug testDebugUnitTest lintDebug
 ```
 
-The checked project passes backend/web lint and type checks, focused backend/web tests, production builds, and Prisma schema validation. Connected Android UI tests require an emulator/device. A live production migration still requires the target PostgreSQL credentials and a verified backup; it must be run once as a release step, never during every Vercel build. See [testing](docs/testing.md) and [business upgrades](docs/business-upgrades.md).
+Run backend/web lint, type checks, tests, production builds and Prisma schema validation before release. The guarded production API build applies only pending versioned migrations using Vercel's existing database secret; previews and function cold starts never migrate. Preserve provider restore points and verify migration history first. See [testing](docs/testing.md), [deployment](docs/deployment.md) and [digital services](docs/digital-services.md).
 
 ## Documentation
 
 - [Architecture](docs/architecture.md) · [API](docs/api.md) · [Database/ERD](docs/database.md)
 - [Security](docs/security.md) · [Privacy and retention](docs/privacy-retention.md)
 - [Initial admin](docs/initial-setup.md) · [Web](docs/web-setup.md) · [Android](docs/android-setup.md)
-- [Google Sign-In](docs/google-sign-in.md) · [M-Pesa readiness](docs/mpesa-integration.md)
+- [Sign-in migration](docs/google-sign-in.md) · [M-Pesa readiness](docs/mpesa-integration.md)
 - [Testing](docs/testing.md) · [Deployment](docs/deployment.md) · [Troubleshooting](docs/troubleshooting.md)
 - [Business upgrades and migration checklist](docs/business-upgrades.md)
 - [User manual](docs/user-manual.md) · [Administrator](docs/administrator-manual.md) · [Technician](docs/technician-manual.md) · [Customer](docs/customer-manual.md)

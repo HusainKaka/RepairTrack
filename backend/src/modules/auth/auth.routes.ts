@@ -8,7 +8,7 @@ import { prisma } from "../../lib/prisma.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import { authOrigin } from "../../middleware/auth-origin.js";
 import { validate } from "../../middleware/validate.js";
-import { googleLogin, login, logout, refresh, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./auth.service.js";
+import { login, logout, refresh, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./auth.service.js";
 
 const router = Router();
 const authLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 20, standardHeaders: "draft-8", legacyHeaders: false });
@@ -25,12 +25,6 @@ router.post("/signup", validate(z.object({ businessId: z.uuid(), email: z.email(
 
 router.post("/login", credentialLimiter, validate(z.object({ email: z.email(), password: z.string().min(1).max(128) })), async (request, response) => {
   const result = await login(request.body.email, request.body.password, request);
-  response.cookie(refreshCookie, result.refreshToken, cookieOptions);
-  response.json({ success: true, data: { accessToken: result.accessToken, expiresInSeconds: result.expiresInSeconds, user: result.user } });
-});
-
-router.post("/google", credentialLimiter, validate(z.object({ idToken: z.string().min(50).max(8192), businessId: z.uuid().optional() })), async (request, response) => {
-  const result = await googleLogin(request.body.idToken, request.body.businessId, request);
   response.cookie(refreshCookie, result.refreshToken, cookieOptions);
   response.json({ success: true, data: { accessToken: result.accessToken, expiresInSeconds: result.expiresInSeconds, user: result.user } });
 });

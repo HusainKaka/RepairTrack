@@ -70,6 +70,23 @@ enum RepairPriority {
   URGENT
 }
 
+enum DigitalServiceKind {
+  WEBSITE
+  SOFTWARE
+  AI_AGENT
+}
+
+enum DigitalTicketStatus {
+  INTAKE
+  DISCOVERY
+  AWAITING_APPROVAL
+  IN_PROGRESS
+  TESTING
+  READY_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
 enum NoteVisibility {
   INTERNAL
   CUSTOMER
@@ -224,6 +241,9 @@ model Business {
   customers                 Customer[]
   devices                   Device[]
   repairs                   Repair[]
+  digitalTickets            DigitalTicket[]
+  digitalStatusHistory      DigitalStatusHistory[]
+  digitalNotes              DigitalNote[]
   repairStatusHistory       RepairStatusHistory[]
   repairNotes               RepairNote[]
   repairAssignments         RepairAssignment[]
@@ -286,6 +306,8 @@ model User {
   role                         Role                   @relation(fields: [roleId], references: [id], onDelete: Restrict)
   customerProfile              Customer?
   assignedRepairs              Repair[]               @relation("AssignedTechnician")
+  assignedDigitalTickets       DigitalTicket[]        @relation("AssignedDigitalTechnician")
+  digitalNotes                 DigitalNote[]          @relation("DigitalNoteAuthor")
   repairNotes                  RepairNote[]           @relation("RepairNoteAuthor")
   assignmentsAsTechnician      RepairAssignment[]     @relation("AssignmentTechnician")
   assignmentsMade              RepairAssignment[]     @relation("AssignmentActor")
@@ -321,6 +343,8 @@ model Customer {
   notes                  String?
   customerType           CustomerType                   @default(INDIVIDUAL)
   whatsappPhone          String?
+  whatsappOptIn          Boolean                        @default(false)
+  whatsappOptInAt        DateTime?
   kraPin                 String?
   preferredCommunication CustomerNotificationPreference @default(EMAIL)
   status                 AccountStatus                  @default(ACTIVE)
@@ -331,6 +355,7 @@ model Customer {
   user                   User?                          @relation(fields: [userId], references: [id], onDelete: SetNull)
   devices                Device[]
   repairs                Repair[]
+  digitalTickets         DigitalTicket[]
   invoices               Invoice[]
   payments               Payment[]
   responses              CustomerRepairResponse[]
@@ -418,6 +443,73 @@ model Repair {
   @@index([businessId, assignedTechnicianId])
   @@index([businessId, createdAt])
   @@map("repairs")
+}
+
+model DigitalTicket {
+  id                           String              @id @default(uuid()) @db.Uuid
+  businessId                   String              @db.Uuid
+  customerId                   String              @db.Uuid
+  assignedTechnicianId         String?             @db.Uuid
+  kind                         DigitalServiceKind
+  reference                    String
+  title                        String
+  requirements                 String
+  priority                     RepairPriority      @default(NORMAL)
+  status                       DigitalTicketStatus @default(INTAKE)
+  internalNotes                String?
+  customerVisibleNotes         String?
+  estimatedCompletionAt        DateTime?
+  deliveredAt                  DateTime?
+  publicTrackingTokenHash      String              @unique
+  publicTrackingTokenEncrypted String
+  createdAt                    DateTime            @default(now())
+  updatedAt                    DateTime            @updatedAt
+  deletedAt                    DateTime?
+  business                     Business            @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  customer                     Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  assignedTechnician           User?               @relation("AssignedDigitalTechnician", fields: [assignedTechnicianId], references: [id], onDelete: SetNull)
+  statusHistory                DigitalStatusHistory[]
+  notes                        DigitalNote[]
+  invoices                     Invoice[]
+  notifications                Notification[]
+
+  @@unique([businessId, reference])
+  @@index([businessId, kind, status])
+  @@index([businessId, assignedTechnicianId])
+  @@index([businessId, customerId, createdAt])
+  @@map("digital_tickets")
+}
+
+model DigitalStatusHistory {
+  id              String              @id @default(uuid()) @db.Uuid
+  businessId      String              @db.Uuid
+  digitalTicketId String              @db.Uuid
+  fromStatus      DigitalTicketStatus?
+  toStatus        DigitalTicketStatus
+  changedByUserId String?             @db.Uuid
+  customerMessage String?
+  createdAt       DateTime            @default(now())
+  business        Business            @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  digitalTicket   DigitalTicket       @relation(fields: [digitalTicketId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, digitalTicketId, createdAt])
+  @@map("digital_status_history")
+}
+
+model DigitalNote {
+  id              String         @id @default(uuid()) @db.Uuid
+  businessId      String         @db.Uuid
+  digitalTicketId String         @db.Uuid
+  authorId        String         @db.Uuid
+  body            String
+  visibility      NoteVisibility @default(INTERNAL)
+  createdAt       DateTime       @default(now())
+  business        Business       @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  digitalTicket   DigitalTicket  @relation(fields: [digitalTicketId], references: [id], onDelete: Cascade)
+  author          User           @relation("DigitalNoteAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([businessId, digitalTicketId, createdAt])
+  @@map("digital_notes")
 }
 
 model RepairStatusHistory {
@@ -561,6 +653,7 @@ model Invoice {
   businessId           String               @db.Uuid
   customerId           String               @db.Uuid
   repairId             String?              @db.Uuid
+  digitalTicketId      String?              @db.Uuid
   number               String
   issuedAt             DateTime?
   dueAt                DateTime?
@@ -585,6 +678,7 @@ model Invoice {
   business             Business             @relation(fields: [businessId], references: [id], onDelete: Restrict)
   customer             Customer             @relation(fields: [customerId], references: [id], onDelete: Restrict)
   repair               Repair?              @relation(fields: [repairId], references: [id], onDelete: SetNull)
+  digitalTicket        DigitalTicket?       @relation(fields: [digitalTicketId], references: [id], onDelete: SetNull)
   items                InvoiceItem[]
   payments             Payment[]
   receipts             Receipt[]
@@ -593,6 +687,7 @@ model Invoice {
   @@unique([businessId, number])
   @@index([businessId, status, createdAt])
   @@index([businessId, customerId])
+  @@index([businessId, digitalTicketId])
   @@map("invoices")
 }
 
@@ -677,9 +772,11 @@ model Notification {
   businessId    String               @db.Uuid
   userId        String?              @db.Uuid
   repairId      String?              @db.Uuid
+  digitalTicketId String?            @db.Uuid
   channel       NotificationChannel
   status        NotificationStatus   @default(PENDING)
   template      String
+  deduplicationKey String?             @unique
   category      NotificationCategory @default(SYSTEM)
   recipient     String
   subject       String?
@@ -693,9 +790,11 @@ model Notification {
   business      Business             @relation(fields: [businessId], references: [id], onDelete: Restrict)
   user          User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
   repair        Repair?              @relation(fields: [repairId], references: [id], onDelete: SetNull)
+  digitalTicket DigitalTicket?       @relation(fields: [digitalTicketId], references: [id], onDelete: SetNull)
 
   @@index([businessId, status, createdAt])
   @@index([userId, readAt])
+  @@index([businessId, digitalTicketId, createdAt])
   @@map("notifications")
 }
 

@@ -1,6 +1,7 @@
 import { InvoiceStatus, PaymentStatus, type Prisma, type PrismaClient } from "../../generated/prisma/index.js";
 import { AppError } from "../../errors/app-error.js";
 import { nextDocumentNumber } from "../../lib/identifiers.js";
+import { getBusinessLogoDataUrl } from "../../lib/business-logo.js";
 import { calculateInvoice } from "./invoice-calculation.js";
 import { defaultLabourItem } from "./invoice-policy.js";
 
@@ -14,7 +15,7 @@ export async function recalculateInvoice(tx: TransactionClient, invoiceId: strin
   const amountPaid = Number(invoice.amountPaid);
   const balance = Math.max(calculation.total - amountPaid, 0);
   const paymentStatus = balance === 0 ? PaymentStatus.PAID : amountPaid > 0 ? PaymentStatus.PARTIALLY_PAID : PaymentStatus.UNPAID;
-  await tx.invoice.update({ where: { id: invoiceId }, data: { subtotal: calculation.subtotal, taxAmount: calculation.taxAmount, discountAmount: calculation.discountAmount, invoiceLevelDiscount: appliedInvoiceDiscount, total: calculation.total, balance, paymentStatus, status: paymentStatus === PaymentStatus.PAID ? InvoiceStatus.PAID : invoice.status === InvoiceStatus.PAID ? InvoiceStatus.ISSUED : invoice.status } });
+  await tx.invoice.update({ where: { id: invoiceId }, data: { subtotal: calculation.subtotal, taxAmount: calculation.taxAmount, discountAmount: calculation.discountAmount, invoiceLevelDiscount: appliedInvoiceDiscount, total: calculation.total, balance, paymentStatus, status: invoice.status === InvoiceStatus.DRAFT ? InvoiceStatus.DRAFT : paymentStatus === PaymentStatus.PAID ? InvoiceStatus.PAID : invoice.status === InvoiceStatus.PAID ? InvoiceStatus.ISSUED : invoice.status } });
   if (invoice.repairId) await tx.repair.updateMany({ where: { id: invoice.repairId, businessId: invoice.businessId, status: "AWAITING_CUSTOMER_APPROVAL", deletedAt: null }, data: { approvalVersion: { increment: 1 } } });
 }
 
@@ -30,8 +31,10 @@ export async function ensureDraftInvoice(tx: TransactionClient, businessId: stri
 }
 
 export async function getInvoiceForAccess(client: PrismaClient, invoiceId: string, businessId: string, customerUserId?: string) {
-  return client.invoice.findFirst({
+  const invoice = await client.invoice.findFirst({
     where: { id: invoiceId, businessId, deletedAt: null, ...(customerUserId ? { customer: { userId: customerUserId } } : {}) },
-    include: { business: true, customer: true, repair: { include: { device: true } }, items: true, payments: { orderBy: { paidAt: "asc" } }, receipts: true }
+    include: { business: { include: { taxSettings: { select: { etimsEnabled: true } } } }, customer: true, repair: { include: { device: true } }, digitalTicket: { select: { id: true, reference: true, kind: true, title: true, status: true } }, items: true, payments: { orderBy: { paidAt: "asc" } }, receipts: true }
   });
+  if (!invoice) return null;
+  return { ...invoice, business: { ...invoice.business, logoImageUrl: await getBusinessLogoDataUrl(invoice.businessId) } };
 }

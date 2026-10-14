@@ -1,5 +1,4 @@
 import { AccountStatus, RoleCode, type User } from "../../generated/prisma/index.js";
-import { OAuth2Client } from "google-auth-library";
 import type { Request } from "express";
 import { env } from "../../config/env.js";
 import { AppError } from "../../errors/app-error.js";
@@ -8,7 +7,7 @@ import { createOpaqueToken, hashPassword, hashToken, passwordPolicy, verifyPassw
 import { mailProvider } from "../../lib/mail.js";
 import { prisma } from "../../lib/prisma.js";
 import { signAccessToken } from "../../middleware/authenticate.js";
-import { assertEmailVerificationAllowed, assertGoogleLinkAllowed, passwordResetActivation } from "./account-state.js";
+import { assertEmailVerificationAllowed, passwordResetActivation } from "./account-state.js";
 
 const LOCK_THRESHOLD = 5;
 const LOCK_MINUTES = 15;
@@ -171,31 +170,4 @@ export async function resetPassword(rawToken: string, password: string): Promise
     if (updated.count !== 1) throw new AppError(400, "INVALID_RESET_TOKEN", "The account state has changed. Request a new reset link.");
     await tx.session.updateMany({ where: { userId: record.userId, revokedAt: null }, data: { revokedAt: new Date() } });
   });
-}
-
-export async function googleLogin(idToken: string, businessId: string | undefined, request: Request): Promise<SessionResult> {
-  if (!env.GOOGLE_WEB_CLIENT_ID) throw new AppError(503, "GOOGLE_SIGN_IN_NOT_CONFIGURED", "Google Sign-In is not configured.");
-  const ticket = await new OAuth2Client(env.GOOGLE_WEB_CLIENT_ID).verifyIdToken({ idToken, audience: env.GOOGLE_WEB_CLIENT_ID });
-  const payload = ticket.getPayload();
-  if (!payload?.sub || !payload.email || !payload.email_verified) throw new AppError(401, "INVALID_GOOGLE_TOKEN", "Google could not verify this account.");
-  let user = await prisma.user.findFirst({ where: { OR: [{ googleSubject: payload.sub }, { email: payload.email.toLowerCase() }] }, include: { role: true, business: { select: { status: true } } } });
-  if (!user) {
-    if (!businessId) throw new AppError(422, "BUSINESS_REQUIRED", "Select a repair business before creating a customer account.");
-    const business = await prisma.business.findFirst({ where: { id: businessId, status: "ACTIVE", deletedAt: null } });
-    if (!business) throw new AppError(404, "BUSINESS_NOT_FOUND", "The selected repair business is unavailable.");
-    const role = await prisma.role.upsert({ where: { code: RoleCode.CUSTOMER }, update: {}, create: { code: RoleCode.CUSTOMER, name: "Customer" } });
-    const created = await prisma.user.create({ data: { businessId, roleId: role.id, email: payload.email.toLowerCase(), fullName: payload.name ?? payload.email, googleSubject: payload.sub, emailVerifiedAt: new Date(), status: AccountStatus.ACTIVE } });
-    user = { ...created, role, business: { status: "ACTIVE" } };
-  } else if (user.googleSubject && user.googleSubject !== payload.sub) {
-    throw new AppError(401, "GOOGLE_IDENTITY_MISMATCH", "This Google identity is not linked to the account.");
-  } else if (!user.googleSubject) {
-    assertGoogleLinkAllowed(user.status);
-    const linked = await prisma.user.updateMany({ where: { id: user.id, status: user.status, googleSubject: null, deletedAt: null }, data: { googleSubject: payload.sub, emailVerifiedAt: user.emailVerifiedAt ?? new Date(), status: AccountStatus.ACTIVE } });
-    if (linked.count !== 1) throw new AppError(401, "GOOGLE_IDENTITY_MISMATCH", "The account changed while linking Google. Sign in again.");
-    user = { ...user, googleSubject: payload.sub, emailVerifiedAt: user.emailVerifiedAt ?? new Date(), status: AccountStatus.ACTIVE };
-  }
-  if (user.status !== AccountStatus.ACTIVE) throw new AppError(403, "ACCOUNT_INACTIVE", "The account is not active.");
-  if (user.business && user.business.status !== "ACTIVE") throw new AppError(403, "BUSINESS_INACTIVE", "The business account is not active.");
-  await writeAudit(prisma, request, { businessId: user.businessId, userId: user.id, userRole: user.role.code, action: "GOOGLE_LOGIN_SUCCEEDED", resourceType: "session" });
-  return issueSession(user, request);
 }

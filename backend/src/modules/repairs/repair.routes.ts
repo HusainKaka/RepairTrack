@@ -12,6 +12,7 @@ import { authenticate } from "../../middleware/authenticate.js";
 import { authorize, requireBusiness } from "../../middleware/authorize.js";
 import { routeParam, validate } from "../../middleware/validate.js";
 import { createInternalNotification, notifyRepairCreated, notifyRepairStatus } from "../notifications/notification.service.js";
+import { whatsappConsentUpdate } from "../customers/whatsapp-consent.js";
 
 const router = Router();
 
@@ -39,7 +40,7 @@ function technicianRestriction(request: Express.Request): { assignedTechnicianId
 const newCustomerSchema = z.object({
   fullName: z.string().trim().min(2).max(120), email: z.email().optional(), phone: z.string().trim().min(7).max(30), whatsappPhone: z.string().trim().min(7).max(30).optional(),
   kraPin: z.string().trim().regex(/^[AP]\d{9}[A-Z]$/i, "Enter a valid KRA PIN such as A123456789B").optional(), address: z.string().trim().max(300).optional(),
-  customerType: z.enum(["INDIVIDUAL", "BUSINESS"]).default("INDIVIDUAL"), preferredCommunication: z.enum(["EMAIL", "WHATSAPP"]).default("EMAIL")
+  customerType: z.enum(["INDIVIDUAL", "BUSINESS"]).default("INDIVIDUAL"), preferredCommunication: z.enum(["EMAIL", "WHATSAPP"]).default("EMAIL"), whatsappOptIn: z.boolean().default(false)
 });
 
 const newDeviceSchema = z.object({
@@ -109,7 +110,7 @@ router.post("/", authorize(RoleCode.BUSINESS_ADMIN), validate(createSchema), asy
   const repair = await prisma.$transaction(async (tx) => {
     const customer = input.customerId
       ? await tx.customer.findFirst({ where: { id: input.customerId, businessId, deletedAt: null } })
-      : await tx.customer.create({ data: { ...input.newCustomer!, email: input.newCustomer!.email?.toLowerCase(), kraPin: input.newCustomer!.kraPin?.toUpperCase(), businessId } });
+      : await tx.customer.create({ data: { ...input.newCustomer!, ...whatsappConsentUpdate(input.newCustomer!), email: input.newCustomer!.email?.toLowerCase(), kraPin: input.newCustomer!.kraPin?.toUpperCase(), businessId } });
     if (!customer) throw notFound("Customer");
     const device = input.deviceId
       ? await tx.device.findFirst({ where: { id: input.deviceId, businessId, customerId: customer.id, deletedAt: null } })

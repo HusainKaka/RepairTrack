@@ -1,6 +1,6 @@
 import PDFDocument from "pdfkit";
 import QRCode from "qrcode";
-import { loadPublicLogo } from "./public-image.js";
+import { documentFooter, getBusinessLogoBuffer } from "./business-logo.js";
 
 const asBuffer = (document: PDFKit.PDFDocument): Promise<Buffer> => new Promise((resolve, reject) => {
   const chunks: Buffer[] = [];
@@ -14,16 +14,18 @@ const money = (currency: string, value: unknown): string => `${currency} ${Numbe
 export async function renderInvoicePdf(invoice: any, publicUrl: string): Promise<Buffer> {
   const document = new PDFDocument({ size: "A4", margin: 48, info: { Title: `Invoice ${invoice.number}`, Author: "RepairTrack" } });
   const result = asBuffer(document);
-  const logo = await loadPublicLogo(invoice.business.logoUrl);
+  const logo = await getBusinessLogoBuffer(invoice.businessId ?? invoice.business.id);
+  const kraEnabled = invoice.business.taxSettings?.etimsEnabled === true;
   if (logo) { document.image(logo, 48, 42, { fit: [120, 54], valign: "center" }); document.moveDown(3.2); }
   document.fontSize(22).fillColor("#2563EB").text(invoice.business.name, { align: "left" });
   document.fontSize(10).fillColor("#334155").text(`${invoice.business.address}, ${invoice.business.city}\n${invoice.business.phone} • ${invoice.business.email}`);
-  if (invoice.business.taxPin) document.text(`KRA PIN: ${invoice.business.taxPin}`);
+  if (kraEnabled && invoice.business.taxPin) document.text(`KRA PIN: ${invoice.business.taxPin}`);
   document.moveUp(3).fontSize(22).fillColor("#0F172A").text("INVOICE", { align: "right" });
   document.fontSize(10).text(invoice.number, { align: "right" });
   document.moveDown(2).fillColor("#0F172A").fontSize(11).text(`Bill to: ${invoice.customer.fullName}`);
   document.text(`${invoice.customer.email ?? ""} ${invoice.customer.phone}`.trim());
   if (invoice.repair) document.text(`Repair: ${invoice.repair.reference} • ${invoice.repair.device.brand} ${invoice.repair.device.model}`);
+  if (invoice.digitalTicket) document.text(`Ticket: ${invoice.digitalTicket.reference} • ${invoice.digitalTicket.title}`);
   document.moveDown();
   document.font("Helvetica-Bold").text("Description", 48, document.y, { width: 270 });
   document.text("Qty", 330, document.y - 13, { width: 45, align: "right" });
@@ -44,10 +46,10 @@ export async function renderInvoicePdf(invoice: any, publicUrl: string): Promise
   document.text(`Discount: ${money(invoice.business.currency, invoice.discountAmount)}`, { align: "right" });
   document.fontSize(14).text(`Total: ${money(invoice.business.currency, invoice.total)}`, { align: "right" });
   document.fontSize(11).text(`Paid: ${money(invoice.business.currency, invoice.amountPaid)}   Balance: ${money(invoice.business.currency, invoice.balance)}`, { align: "right" });
-  document.fontSize(9).fillColor("#475569").text(`eTIMS: ${String(invoice.kraStatus).replaceAll("_", " ")}${invoice.kraReference ? ` • ${invoice.kraReference}` : ""}`, { align: "right" });
+  if (kraEnabled) document.fontSize(9).fillColor("#475569").text(`eTIMS: ${String(invoice.kraStatus).replaceAll("_", " ")}${invoice.kraReference ? ` • ${invoice.kraReference}` : ""}`, { align: "right" });
   const qr = await QRCode.toBuffer(publicUrl, { width: 180, margin: 1, errorCorrectionLevel: "M" });
   document.image(qr, 48, Math.min(document.y + 18, 650), { width: 82 });
-  document.font("Helvetica").fontSize(9).text(invoice.terms ?? invoice.business.invoiceFooter ?? "Thank you for choosing us.", 150, Math.min(document.y + 35, 680), { width: 380 });
+  document.font("Helvetica").fontSize(9).text(documentFooter(invoice.terms ?? invoice.business.invoiceFooter, kraEnabled, "Thank you for choosing us."), 150, Math.min(document.y + 35, 680), { width: 380 });
   document.end();
   return result;
 }
@@ -57,18 +59,21 @@ export async function renderReceiptPdf(receipt: any, paperWidth: "58mm" | "80mm"
   const thermal = paperWidth !== "A4";
   const document = new PDFDocument({ size: thermal ? [widths[paperWidth], 620] : "A4", margin: thermal ? 12 : 48, info: { Title: `Receipt ${receipt.number}`, Author: "RepairTrack" } });
   const result = asBuffer(document);
-  const logo = await loadPublicLogo(receipt.business.logoUrl);
+  const logo = await getBusinessLogoBuffer(receipt.businessId ?? receipt.business.id);
+  const kraEnabled = receipt.business.taxSettings?.etimsEnabled === true;
   if (logo) { const width = thermal ? 62 : 100; document.image(logo, (document.page.width - width) / 2, document.y, { fit: [width, thermal ? 34 : 50], align: "center" }); document.moveDown(thermal ? 4 : 5); }
   document.fontSize(thermal ? 13 : 20).font("Helvetica-Bold").text(receipt.business.name, { align: "center" });
   document.fontSize(thermal ? 7 : 10).font("Helvetica").text(`${receipt.business.address}\n${receipt.business.phone}`, { align: "center" });
   document.moveDown().font("Helvetica-Bold").text("PAYMENT RECEIPT", { align: "center" });
-  document.font("Helvetica").text(`Receipt: ${receipt.number}\nInvoice: ${receipt.invoice.number}\nRepair: ${receipt.repair?.reference ?? "N/A"}\nStatus: ${receipt.repair?.status ?? receipt.statusSnapshot ?? "N/A"}\nCustomer: ${receipt.invoice.customer.fullName}`);
+  const ticket = receipt.invoice.digitalTicket;
+  document.font("Helvetica").text(`Receipt: ${receipt.number}\nInvoice: ${receipt.invoice.number}\n${ticket ? "Ticket" : "Repair"}: ${ticket?.reference ?? receipt.repair?.reference ?? "N/A"}\nStatus: ${ticket?.status ?? receipt.repair?.status ?? receipt.statusSnapshot ?? "N/A"}\nCustomer: ${receipt.invoice.customer.fullName}`);
+  if (kraEnabled && receipt.business.taxPin) document.text(`KRA PIN: ${receipt.business.taxPin}`);
   document.moveDown(0.5);
   for (const item of receipt.invoice.items ?? []) document.text(`${item.description}  ${Number(item.quantity).toFixed(2)} × ${money(receipt.business.currency, item.unitPrice)}`);
   document.moveDown(0.5).text(`Subtotal: ${money(receipt.business.currency, receipt.invoice.subtotal)}\nTax: ${money(receipt.business.currency, receipt.invoice.taxAmount)}\nDiscount: ${money(receipt.business.currency, receipt.invoice.discountAmount)}\nInvoice total: ${money(receipt.business.currency, receipt.invoice.total)}\nAmount paid now: ${money(receipt.business.currency, receipt.payment.amount)}\nBalance: ${money(receipt.business.currency, receipt.invoice.balance)}\nMethod: ${receipt.payment.method}\nDate: ${new Date(receipt.issuedAt).toLocaleString("en-KE", { timeZone: receipt.business.timeZone })}\nCashier: ${receipt.issuedBy.fullName}`);
   const qr = await QRCode.toBuffer(`${receipt.invoice.number}:${receipt.number}`, { width: 160, margin: 1 });
   document.moveDown().image(qr, (document.page.width - (thermal ? 70 : 90)) / 2, document.y, { width: thermal ? 70 : 90 });
-  document.moveDown(thermal ? 8 : 10).fontSize(thermal ? 7 : 9).text(receipt.business.receiptFooter ?? "Thank you.", { align: "center" });
+  document.moveDown(thermal ? 8 : 10).fontSize(thermal ? 7 : 9).text(documentFooter(receipt.business.receiptFooter, kraEnabled, "Thank you."), { align: "center" });
   document.end();
   return result;
 }

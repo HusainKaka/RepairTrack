@@ -37,6 +37,8 @@ interface Props {
   status: string;
   paymentStatus: string;
   kraEtimsStatus?: string;
+  kraEnabled?: boolean;
+  manualDigital?: boolean;
   invoiceDiscount?: string;
   dueAt?: string;
   terms?: string;
@@ -54,11 +56,49 @@ const emptyItem = {
   discount: "0",
 };
 
+const maxMoneyCents = 999_999_999_999;
+const maxMoney = maxMoneyCents / 100;
+const cents = (value: number) => Math.round((value + Number.EPSILON) * 100);
+const twoDecimals = (value: number) => Number(value.toFixed(2)) === value;
+interface InvoiceAmounts { quantity: number; unitPrice: number; taxRate: number; discount: number }
+
+/** Preview and validate the same discounted-tax base used by the billing API. */
+export function invoiceAmountPreview(items: InvoiceAmounts[], invoiceDiscount = 0): { valid: true; total: number } | { valid: false; message: string } {
+  const invalid = (message: string): { valid: false; message: string } => ({ valid: false, message });
+  if (!items.length || items.length > 100) return invalid("An invoice requires between one and 100 lines.");
+  if (!Number.isFinite(invoiceDiscount) || invoiceDiscount < 0 || invoiceDiscount > maxMoney || !twoDecimals(invoiceDiscount)) return invalid("Enter an invoice discount between 0 and 9,999,999,999.99, with at most two decimal places.");
+  let subtotalCents = 0;
+  let taxCents = 0;
+  let discountCents = 0;
+  for (const item of items) {
+    if (!Number.isFinite(item.quantity) || item.quantity <= 0 || item.quantity > 10_000 || !twoDecimals(item.quantity)) return invalid("Quantity must be greater than 0 and no more than 10,000, with at most two decimal places.");
+    if (!Number.isFinite(item.unitPrice) || item.unitPrice < 0 || item.unitPrice > maxMoney || !twoDecimals(item.unitPrice)) return invalid("Enter a unit price between 0 and 9,999,999,999.99, with at most two decimal places.");
+    if (!Number.isFinite(item.taxRate) || item.taxRate < 0 || item.taxRate > 100 || !twoDecimals(item.taxRate)) return invalid("Tax must be between 0 and 100%, with at most two decimal places.");
+    if (!Number.isFinite(item.discount) || item.discount < 0 || item.discount > maxMoney || !twoDecimals(item.discount)) return invalid("Enter a line discount between 0 and 9,999,999,999.99, with at most two decimal places.");
+    const gross = cents(item.quantity * item.unitPrice);
+    const discount = cents(item.discount);
+    if (!Number.isSafeInteger(gross) || gross > maxMoneyCents) return invalid("A line subtotal cannot exceed 9,999,999,999.99.");
+    if (discount > gross) return invalid("A line discount cannot exceed its subtotal before tax.");
+    const taxable = gross - discount;
+    const tax = Math.round(taxable * item.taxRate / 100);
+    if (taxable + tax > maxMoneyCents) return invalid("A line total cannot exceed 9,999,999,999.99.");
+    subtotalCents += gross; taxCents += tax; discountCents += discount;
+    if (subtotalCents > maxMoneyCents || taxCents > maxMoneyCents || discountCents > maxMoneyCents) return invalid("Invoice amounts cannot exceed 9,999,999,999.99.");
+  }
+  const invoiceDiscountCents = cents(invoiceDiscount);
+  const beforeDiscount = subtotalCents - discountCents + taxCents;
+  if (invoiceDiscountCents > beforeDiscount) return invalid("The invoice discount cannot exceed the total after line discounts and tax.");
+  if (discountCents + invoiceDiscountCents > maxMoneyCents || beforeDiscount > maxMoneyCents) return invalid("Invoice amounts cannot exceed 9,999,999,999.99.");
+  return { valid: true, total: (beforeDiscount - invoiceDiscountCents) / 100 };
+}
+
 export function InvoiceManagementPanel({
   invoiceId,
   status,
   paymentStatus,
   kraEtimsStatus,
+  kraEnabled = false,
+  manualDigital = false,
   invoiceDiscount = "0",
   dueAt,
   terms,
@@ -91,8 +131,21 @@ export function InvoiceManagementPanel({
     queryKey: ["inventory"],
     queryFn: async () =>
       (await api.get<ApiEnvelope<InventoryItem[]>>("/inventory")).data.data,
-    enabled: editable,
+    enabled: editable && !manualDigital,
   });
+  const selectedInventory = inventory.data?.find((item) => item.id === line.inventoryItemId);
+  const candidateLine = {
+    quantity: Number(line.quantity),
+    unitPrice: line.itemType === "INVENTORY" && !line.unitPrice ? Number(selectedInventory?.sellingPrice) : Number(line.unitPrice),
+    taxRate: Number(line.taxRate),
+    discount: Number(line.discount),
+  };
+  const linePreview = invoiceAmountPreview([
+    ...items.filter((item) => item.id !== editing?.id).map((item) => ({ quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), taxRate: Number(item.taxRate), discount: Number(item.discount) })),
+    candidateLine,
+  ], Number(invoiceDiscount));
+  const completeLine = line.itemType === "INVENTORY" ? Boolean(selectedInventory) : Boolean(line.description.trim() && line.unitPrice.trim());
+  const settingsPreview = invoiceAmountPreview(items.map((item) => ({ quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), taxRate: Number(item.taxRate), discount: Number(item.discount) })), Number(settings.invoiceDiscount));
   const saveLine = useMutation({
     mutationFn: () => {
       const payload = {
@@ -200,8 +253,7 @@ export function InvoiceManagementPanel({
           <div>
             <Typography variant="h6">Invoice controls</Typography>
             <Typography color="text.secondary" variant="body2">
-              Draft editing, inventory links, discounts, compliance submission,
-              and safe deletion are audited.
+              {manualDigital ? "Manual project charges, discounts, and safe deletion are audited." : "Draft editing, inventory links, discounts, and safe deletion are audited."}
             </Typography>
           </div>
           <Stack direction="row" flexWrap="wrap" gap={1}>
@@ -225,7 +277,7 @@ export function InvoiceManagementPanel({
                 </Button>
               </>
             )}
-            {status === "ISSUED" && kraEtimsStatus === "PENDING" && (
+            {kraEnabled && status === "ISSUED" && kraEtimsStatus === "PENDING" && (
               <Button
                 startIcon={<GavelOutlined />}
                 onClick={() => kra.mutate()}
@@ -298,6 +350,7 @@ export function InvoiceManagementPanel({
           onClose={() => setItemOpen(false)}
           onSubmit={() => saveLine.mutate()}
           submitLabel={editing ? "Save line" : "Add line"}
+          submitDisabled={!completeLine || !linePreview.valid}
         >
           <TextField
             select
@@ -307,7 +360,7 @@ export function InvoiceManagementPanel({
               setLine({ ...line, itemType: event.target.value })
             }
           >
-            {["CUSTOM", "LABOUR", "SERVICE", "INVENTORY"].map((value) => (
+            {(manualDigital ? ["CUSTOM", "SERVICE"] : ["CUSTOM", "LABOUR", "SERVICE", "INVENTORY"]).map((value) => (
               <MenuItem key={value} value={value}>
                 {value}
               </MenuItem>
@@ -352,6 +405,7 @@ export function InvoiceManagementPanel({
               fullWidth
               type="number"
               label="Quantity"
+              slotProps={{ htmlInput: { min: 0.01, max: 10000, step: 0.01 } }}
               value={line.quantity}
               onChange={(event) =>
                 setLine({ ...line, quantity: event.target.value })
@@ -361,6 +415,7 @@ export function InvoiceManagementPanel({
               fullWidth
               type="number"
               label="Unit price"
+              slotProps={{ htmlInput: { min: 0, max: maxMoney, step: 0.01 } }}
               value={line.unitPrice}
               onChange={(event) =>
                 setLine({ ...line, unitPrice: event.target.value })
@@ -372,6 +427,7 @@ export function InvoiceManagementPanel({
               fullWidth
               type="number"
               label="Tax %"
+              slotProps={{ htmlInput: { min: 0, max: 100, step: 0.01 } }}
               value={line.taxRate}
               onChange={(event) =>
                 setLine({ ...line, taxRate: event.target.value })
@@ -381,12 +437,16 @@ export function InvoiceManagementPanel({
               fullWidth
               type="number"
               label="Line discount"
+              slotProps={{ htmlInput: { min: 0, max: maxMoney, step: 0.01 } }}
               value={line.discount}
               onChange={(event) =>
                 setLine({ ...line, discount: event.target.value })
               }
             />
           </Stack>
+          <Alert severity={linePreview.valid ? "info" : "warning"}>
+            {linePreview.valid ? `Estimated invoice total: KES ${linePreview.total.toLocaleString()}` : linePreview.message}
+          </Alert>
         </FormDialog>
         <FormDialog
           open={settingsOpen}
@@ -397,6 +457,7 @@ export function InvoiceManagementPanel({
           }
           onClose={() => setSettingsOpen(false)}
           onSubmit={() => saveSettings.mutate()}
+          submitDisabled={!settingsPreview.valid}
         >
           <TextField
             type="datetime-local"
@@ -410,6 +471,7 @@ export function InvoiceManagementPanel({
           <TextField
             type="number"
             label="Invoice-level discount"
+            slotProps={{ htmlInput: { min: 0, max: maxMoney, step: 0.01 } }}
             value={settings.invoiceDiscount}
             onChange={(event) =>
               setSettings({ ...settings, invoiceDiscount: event.target.value })
@@ -433,6 +495,9 @@ export function InvoiceManagementPanel({
               setSettings({ ...settings, notes: event.target.value })
             }
           />
+          <Alert severity={settingsPreview.valid ? "info" : "warning"}>
+            {settingsPreview.valid ? `Estimated invoice total: KES ${settingsPreview.total.toLocaleString()}` : settingsPreview.message}
+          </Alert>
         </FormDialog>
         <FormDialog
           open={Boolean(removeItem)}
@@ -463,7 +528,7 @@ export function InvoiceManagementPanel({
           submitDisabled={reason.trim().length < 3}
         >
           <Alert severity="warning">
-            Paid invoices and confirmed eTIMS submissions cannot be deleted.
+            {kraEnabled ? "Paid invoices and confirmed eTIMS submissions cannot be deleted." : "Paid invoices and finalized records cannot be deleted."}
             Issued inventory is safely returned only when allowed.
           </Alert>
           <TextField

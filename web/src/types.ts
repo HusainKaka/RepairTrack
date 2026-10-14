@@ -42,6 +42,8 @@ export interface Customer {
   phone: string;
   alternativePhone?: string;
   whatsappPhone?: string;
+  whatsappOptIn?: boolean;
+  whatsappOptInAt?: string | null;
   address?: string;
   notes?: string;
   customerType?: "INDIVIDUAL" | "BUSINESS";
@@ -83,6 +85,74 @@ export interface Invoice {
   kraStatus?: string;
   customer: { id: string; fullName: string };
   repair?: { id: string; reference: string };
+  digitalTicket?: { id: string; reference: string; kind: DigitalServiceKind; title: string };
+  digitalTicketId?: string | null;
+  kraEnabled?: boolean;
+}
+
+export type DigitalServiceKind = "WEBSITE" | "SOFTWARE" | "AI_AGENT";
+export type DigitalServiceStatus =
+  | "INTAKE"
+  | "DISCOVERY"
+  | "AWAITING_APPROVAL"
+  | "IN_PROGRESS"
+  | "TESTING"
+  | "READY_FOR_DELIVERY"
+  | "DELIVERED"
+  | "CANCELLED";
+
+export interface DigitalTicket {
+  id: string;
+  reference: string;
+  kind: DigitalServiceKind;
+  title: string;
+  requirements: string;
+  status: DigitalServiceStatus;
+  priority: string;
+  createdAt: string;
+  estimatedCompletionAt?: string | null;
+  deliveredAt?: string | null;
+  customerVisibleNotes?: string | null;
+  customer: { id: string; fullName: string; phone?: string; email?: string };
+  assignedTechnician?: { id: string; fullName: string } | null;
+}
+
+export interface DigitalTicketDetail extends DigitalTicket {
+  internalNotes?: string | null;
+  statusHistory: {
+    id: string;
+    fromStatus?: DigitalServiceStatus | null;
+    toStatus: DigitalServiceStatus;
+    customerMessage?: string | null;
+    createdAt: string;
+  }[];
+  notes: {
+    id: string;
+    body: string;
+    visibility: "INTERNAL" | "CUSTOMER";
+    createdAt: string;
+    author?: { fullName: string } | null;
+  }[];
+  invoices: Invoice[];
+}
+
+export interface PublicDigitalTicket {
+  reference: string;
+  kind: DigitalServiceKind;
+  title: string;
+  status: DigitalServiceStatus;
+  dateReceived: string;
+  estimatedCompletionAt?: string | null;
+  deliveredAt?: string | null;
+  customerVisibleNotes?: string | null;
+  business: { name: string; phone: string; email?: string; currency?: string; logoImageUrl?: string | null };
+  statusHistory: {
+    toStatus: DigitalServiceStatus;
+    customerMessage?: string | null;
+    createdAt: string;
+  }[];
+  invoices: Pick<Invoice, "number" | "status" | "paymentStatus" | "total" | "balance">[];
+  notes?: { body: string; createdAt: string; visibility?: "INTERNAL" | "CUSTOMER" }[];
 }
 
 export interface Technician {

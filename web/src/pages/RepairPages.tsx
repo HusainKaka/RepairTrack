@@ -10,9 +10,11 @@ import {
   Button,
   Card,
   CardContent,
+  Checkbox,
   Chip,
   Divider,
   Grid,
+  FormControlLabel,
   InputAdornment,
   MenuItem,
   Paper,
@@ -86,7 +88,7 @@ const emptyRepair = {
   customerVisibleNotes: "",
   notificationPreferenceOverride: "",
 };
-const emptyNewCustomer = { fullName: "", email: "", phone: "", whatsappPhone: "", kraPin: "", address: "", customerType: "INDIVIDUAL", preferredCommunication: "EMAIL" };
+const emptyNewCustomer = { fullName: "", email: "", phone: "", whatsappPhone: "", kraPin: "", address: "", customerType: "INDIVIDUAL", preferredCommunication: "EMAIL", whatsappOptIn: false };
 const emptyNewDevice = { type: "Laptop", brand: "", model: "", serialNumber: "", imei: "", colour: "", accessories: "", physicalCondition: "" };
 
 export function RepairsPage() {
@@ -328,8 +330,10 @@ export function RepairsPage() {
               ))}
             </TextField>
             ) : (
-              <Stack spacing={2}><TextField required label="Customer or business name" value={newCustomer.fullName} onChange={(event) => setNewCustomer({ ...newCustomer, fullName: event.target.value })} /><Stack direction={{ xs: "column", sm: "row" }} gap={2}><TextField required fullWidth label="Phone" value={newCustomer.phone} onChange={(event) => setNewCustomer({ ...newCustomer, phone: event.target.value })} /><TextField fullWidth type="email" label="Email" value={newCustomer.email} onChange={(event) => setNewCustomer({ ...newCustomer, email: event.target.value })} /></Stack><Stack direction={{ xs: "column", sm: "row" }} gap={2}><TextField select fullWidth label="Customer type" value={newCustomer.customerType} onChange={(event) => setNewCustomer({ ...newCustomer, customerType: event.target.value })}><MenuItem value="INDIVIDUAL">Individual</MenuItem><MenuItem value="BUSINESS">Business</MenuItem></TextField><TextField fullWidth label="KRA PIN" value={newCustomer.kraPin} onChange={(event) => setNewCustomer({ ...newCustomer, kraPin: event.target.value.toUpperCase() })} /></Stack><Stack direction={{ xs: "column", sm: "row" }} gap={2}><TextField fullWidth label="WhatsApp phone" value={newCustomer.whatsappPhone} onChange={(event) => setNewCustomer({ ...newCustomer, whatsappPhone: event.target.value })} /><TextField select fullWidth label="Preferred communication" value={newCustomer.preferredCommunication} onChange={(event) => setNewCustomer({ ...newCustomer, preferredCommunication: event.target.value })}><MenuItem value="EMAIL">Email</MenuItem><MenuItem value="WHATSAPP">WhatsApp</MenuItem></TextField></Stack><TextField label="Address" value={newCustomer.address} onChange={(event) => setNewCustomer({ ...newCustomer, address: event.target.value })} /></Stack>
+              <Stack spacing={2}><TextField required label="Customer or business name" value={newCustomer.fullName} onChange={(event) => setNewCustomer({ ...newCustomer, fullName: event.target.value })} /><Stack direction={{ xs: "column", sm: "row" }} gap={2}><TextField required fullWidth label="Phone" value={newCustomer.phone} onChange={(event) => setNewCustomer({ ...newCustomer, phone: event.target.value, whatsappOptIn: false })} /><TextField fullWidth type="email" label="Email" value={newCustomer.email} onChange={(event) => setNewCustomer({ ...newCustomer, email: event.target.value })} /></Stack><Stack direction={{ xs: "column", sm: "row" }} gap={2}><TextField select fullWidth label="Customer type" value={newCustomer.customerType} onChange={(event) => setNewCustomer({ ...newCustomer, customerType: event.target.value })}><MenuItem value="INDIVIDUAL">Individual</MenuItem><MenuItem value="BUSINESS">Business</MenuItem></TextField><TextField fullWidth label="KRA PIN" value={newCustomer.kraPin} onChange={(event) => setNewCustomer({ ...newCustomer, kraPin: event.target.value.toUpperCase() })} /></Stack><Stack direction={{ xs: "column", sm: "row" }} gap={2}><TextField fullWidth label="WhatsApp phone" value={newCustomer.whatsappPhone} onChange={(event) => setNewCustomer({ ...newCustomer, whatsappPhone: event.target.value, whatsappOptIn: false })} /><TextField select fullWidth label="Preferred communication" value={newCustomer.preferredCommunication} onChange={(event) => setNewCustomer({ ...newCustomer, preferredCommunication: event.target.value })}><MenuItem value="EMAIL">Email</MenuItem><MenuItem value="WHATSAPP">WhatsApp</MenuItem></TextField></Stack><TextField label="Address" value={newCustomer.address} onChange={(event) => setNewCustomer({ ...newCustomer, address: event.target.value })} /></Stack>
             )}
+            {customerMode === "new" && <FormControlLabel control={<Checkbox checked={newCustomer.whatsappOptIn} onChange={(event) => setNewCustomer({ ...newCustomer, whatsappOptIn: event.target.checked })} />} label="The customer has agreed to receive WhatsApp ticket and service updates at this number." />}
+            {customerMode === "existing" && form.customerId && <Alert severity="info">WhatsApp ticket messages require recorded customer consent. Manage it in the customer profile.</Alert>}
             <Divider>Device</Divider>
             {customerMode === "existing" && <Stack direction="row" gap={1}><Button variant={deviceMode === "existing" ? "contained" : "outlined"} onClick={() => setDeviceMode("existing")}>Select registered</Button><Button variant={deviceMode === "new" ? "contained" : "outlined"} onClick={() => setDeviceMode("new")}>Register device</Button></Stack>}
             {deviceMode === "existing" ? (

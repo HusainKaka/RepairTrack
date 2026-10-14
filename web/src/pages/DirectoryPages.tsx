@@ -7,7 +7,9 @@ import DeleteOutline from "@mui/icons-material/DeleteOutline";
 import {
   Alert,
   Button,
+  Checkbox,
   Chip,
+  FormControlLabel,
   IconButton,
   InputAdornment,
   MenuItem,
@@ -47,6 +49,7 @@ const emptyCustomer = {
   customerType: "INDIVIDUAL",
   kraPin: "",
   preferredCommunication: "EMAIL",
+  whatsappOptIn: false,
   address: "",
   notes: "",
 };
@@ -131,7 +134,7 @@ export function CustomersPage() {
           required
           label="Phone"
           value={form.phone}
-          onChange={(event) => setForm({ ...form, phone: event.target.value })}
+          onChange={(event) => setForm({ ...form, phone: event.target.value, whatsappOptIn: false })}
         />
         <TextField
           label="Alternative phone"
@@ -140,7 +143,8 @@ export function CustomersPage() {
             setForm({ ...form, alternativePhone: event.target.value })
           }
         />
-        <TextField label="WhatsApp phone" value={form.whatsappPhone} onChange={(event) => setForm({ ...form, whatsappPhone: event.target.value })} />
+        <TextField label="WhatsApp phone" value={form.whatsappPhone} onChange={(event) => setForm({ ...form, whatsappPhone: event.target.value, whatsappOptIn: false })} />
+        <FormControlLabel control={<Checkbox checked={form.whatsappOptIn} onChange={(event) => setForm({ ...form, whatsappOptIn: event.target.checked })} />} label="The customer has agreed to receive WhatsApp ticket and service updates at this number." />
         <Stack direction={{ xs: "column", sm: "row" }} gap={2}><TextField select fullWidth label="Customer type" value={form.customerType} onChange={(event) => setForm({ ...form, customerType: event.target.value })}><MenuItem value="INDIVIDUAL">Individual</MenuItem><MenuItem value="BUSINESS">Business</MenuItem></TextField><TextField fullWidth label="KRA PIN" value={form.kraPin} onChange={(event) => setForm({ ...form, kraPin: event.target.value.toUpperCase() })} /></Stack>
         <TextField select label="Preferred communication" value={form.preferredCommunication} onChange={(event) => setForm({ ...form, preferredCommunication: event.target.value })}><MenuItem value="EMAIL">Email</MenuItem><MenuItem value="WHATSAPP">WhatsApp</MenuItem></TextField>
         <TextField
@@ -795,7 +799,6 @@ export function InventoryPage() {
 
 const emptyBusiness = {
   name: "",
-  logoUrl: "",
   registrationNumber: "",
   taxPin: "",
   email: "",
@@ -833,7 +836,6 @@ export function BusinessesPage() {
     mutationFn: () =>
       api.post("/businesses", {
         name: form.name,
-        logoUrl: form.logoUrl || undefined,
         registrationNumber: form.registrationNumber,
         taxPin: form.taxPin,
         email: form.email,
@@ -940,15 +942,7 @@ export function BusinessesPage() {
           value={form.name}
           onChange={(event) => setForm({ ...form, name: event.target.value })}
         />
-        <TextField
-          type="url"
-          label="Logo HTTPS URL"
-          value={form.logoUrl}
-          onChange={(event) =>
-            setForm({ ...form, logoUrl: event.target.value })
-          }
-          helperText="Upload the logo to an approved media host and paste its HTTPS URL."
-        />
+        <Alert severity="info">After account activation, the business administrator can upload the invoice logo directly in Settings.</Alert>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
           <TextField
             required

@@ -39,8 +39,8 @@ import {
 import { EmptyState, ErrorBlock, LoadingBlock } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { StatusChip } from "../components/StatusChip";
-import { InvoiceManagementPanel } from "../components/InvoiceManagementPanel";
-import type { ApiEnvelope, Customer, Invoice, Repair } from "../types";
+import { InvoiceManagementPanel, invoiceAmountPreview } from "../components/InvoiceManagementPanel";
+import type { ApiEnvelope, Customer, DigitalTicket, Invoice, Repair } from "../types";
 
 interface InvoiceLine {
   key: string;
@@ -65,8 +65,9 @@ interface InvoiceFull extends Invoice {
     email: string;
     phone: string;
     address: string;
-    logoUrl?: string;
+    logoImageUrl?: string;
     taxPin?: string;
+    taxSettings?: { etimsEnabled?: boolean } | null;
   };
   customer: Customer;
   items: {
@@ -116,11 +117,13 @@ async function downloadFile(url: string, filename: string) {
 
 export function InvoicesPage() {
   const { user } = useAuth();
+  const [params] = useSearchParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(user?.role === "BUSINESS_ADMIN" && Boolean(params.get("digitalTicketId")));
   const [customerId, setCustomerId] = useState("");
   const [repairId, setRepairId] = useState("");
+  const [digitalTicketId, setDigitalTicketId] = useState(params.get("digitalTicketId") ?? "");
   const [dueAt, setDueAt] = useState("");
   const [terms, setTerms] = useState("");
   const [discount, setDiscount] = useState("0");
@@ -142,12 +145,26 @@ export function InvoicesPage() {
       (await api.get<ApiEnvelope<Repair[]>>("/repairs")).data.data,
     enabled: user?.role === "BUSINESS_ADMIN",
   });
+  const digitalTickets = useQuery({
+    queryKey: ["digital-services"],
+    queryFn: async () => (await api.get<ApiEnvelope<DigitalTicket[]>>("/digital-services")).data.data,
+    enabled: user?.role === "BUSINESS_ADMIN",
+  });
+  const selectedTicketQuery = useQuery({
+    queryKey: ["digital-service", digitalTicketId],
+    queryFn: async () => (await api.get<ApiEnvelope<DigitalTicket>>(`/digital-services/${encodeURIComponent(digitalTicketId)}`)).data.data,
+    enabled: user?.role === "BUSINESS_ADMIN" && open && Boolean(digitalTicketId) && digitalTickets.isSuccess && !digitalTickets.data.some((ticket) => ticket.id === digitalTicketId),
+  });
+  const availableDigitalTickets = [...(digitalTickets.data ?? []), ...(selectedTicketQuery.data && !digitalTickets.data?.some((ticket) => ticket.id === selectedTicketQuery.data.id) ? [selectedTicketQuery.data] : [])];
+  const selectedDigitalTicket = availableDigitalTickets.find((ticket) => ticket.id === digitalTicketId);
+  const selectedCustomerId = selectedDigitalTicket?.customer.id ?? customerId;
   const create = useMutation({
     mutationFn: async () =>
       (
         await api.post<ApiEnvelope<{ id: string }>>("/invoices", {
-          customerId,
+          customerId: selectedCustomerId,
           repairId: repairId || undefined,
+          digitalTicketId: digitalTicketId || undefined,
           dueAt: dueAt ? new Date(dueAt).toISOString() : undefined,
           invoiceDiscount: Number(discount),
           terms: terms || undefined,
@@ -159,6 +176,7 @@ export function InvoicesPage() {
               taxRate,
               discount: lineDiscount,
             }) => ({
+              itemType: digitalTicketId ? "SERVICE" : undefined,
               description,
               quantity: Number(quantity),
               unitPrice: Number(unitPrice),
@@ -186,26 +204,14 @@ export function InvoicesPage() {
       {invoice.number}
     </Button>,
     invoice.customer.fullName,
-    invoice.repair?.reference ?? "General",
+    invoice.digitalTicket?.reference ?? invoice.repair?.reference ?? "General",
     <StatusChip status={invoice.status} />,
     <StatusChip status={invoice.paymentStatus} />,
     `KES ${Number(invoice.total).toLocaleString()}`,
     `KES ${Number(invoice.balance).toLocaleString()}`,
     new Date(invoice.createdAt).toLocaleDateString(),
   ]);
-  const subtotal =
-    lines.reduce(
-      (sum, line) =>
-        sum +
-        Math.max(
-          Number(line.quantity) *
-            Number(line.unitPrice) *
-            (1 + Number(line.taxRate) / 100) -
-            Number(line.discount),
-          0,
-        ),
-      0,
-    ) - Number(discount || 0);
+  const preview = invoiceAmountPreview(lines.map((line) => ({ quantity: Number(line.quantity), unitPrice: Number(line.unitPrice), taxRate: Number(line.taxRate), discount: Number(line.discount) })), Number(discount));
   return (
     <>
       <PageHeader
@@ -224,7 +230,7 @@ export function InvoicesPage() {
         columns={[
           "Invoice",
           "Customer",
-          "Repair",
+          "Related ticket",
           "Status",
           "Payment",
           "Total",
@@ -241,15 +247,17 @@ export function InvoicesPage() {
         onClose={() => setOpen(false)}
         onSubmit={() => create.mutate()}
         submitLabel="Create draft"
+        submitDisabled={!selectedCustomerId || Boolean(digitalTicketId && !selectedDigitalTicket) || lines.some((line) => !line.description.trim() || !line.unitPrice.trim()) || !preview.valid}
       >
         <TextField
           select
           required
           label="Customer"
-          value={customerId}
+          value={selectedCustomerId}
           onChange={(event) => {
             setCustomerId(event.target.value);
             setRepairId("");
+            setDigitalTicketId("");
           }}
         >
           {(customers.data ?? []).map((customer) => (
@@ -262,17 +270,28 @@ export function InvoicesPage() {
           select
           label="Related repair"
           value={repairId}
-          onChange={(event) => setRepairId(event.target.value)}
+          onChange={(event) => { setCustomerId(selectedCustomerId); setRepairId(event.target.value); setDigitalTicketId(""); }}
         >
           <MenuItem value="">General invoice</MenuItem>
           {(repairs.data ?? [])
-            .filter((repair) => repair.customer.id === customerId)
+            .filter((repair) => repair.customer.id === selectedCustomerId)
             .map((repair) => (
               <MenuItem key={repair.id} value={repair.id}>
                 {repair.reference} · {repair.device.brand} {repair.device.model}
               </MenuItem>
             ))}
         </TextField>
+        <TextField select label="Related digital project" value={digitalTicketId} onChange={(event) => {
+          const ticket = availableDigitalTickets.find((item) => item.id === event.target.value);
+          setDigitalTicketId(event.target.value); setRepairId("");
+          setCustomerId(ticket?.customer.id ?? selectedCustomerId);
+        }}>
+          <MenuItem value="">No digital project</MenuItem>
+          {availableDigitalTickets.filter((ticket) => !selectedCustomerId || ticket.customer.id === selectedCustomerId).map((ticket) => <MenuItem key={ticket.id} value={ticket.id}>{ticket.reference} · {ticket.title}</MenuItem>)}
+        </TextField>
+        {digitalTicketId && <Alert severity="info">Manual digital invoice: enter the agreed deliverables and prices below. No automatic labour charges or inventory deductions apply.</Alert>}
+        {digitalTickets.error && <Alert severity="error">Digital projects could not be loaded. {apiMessage(digitalTickets.error)}</Alert>}
+        {selectedTicketQuery.error && <Alert severity="error">The selected digital project is unavailable. {apiMessage(selectedTicketQuery.error)}</Alert>}
         <TextField
           type="datetime-local"
           label="Due date"
@@ -319,6 +338,7 @@ export function InvoicesPage() {
                   fullWidth
                   type="number"
                   label="Qty"
+                  slotProps={{ htmlInput: { min: 0.01, max: 10000, step: 0.01 } }}
                   value={line.quantity}
                   onChange={(event) =>
                     setLines(
@@ -336,6 +356,7 @@ export function InvoicesPage() {
                   fullWidth
                   type="number"
                   label="Unit price"
+                  slotProps={{ htmlInput: { min: 0, max: 9_999_999_999.99, step: 0.01 } }}
                   value={line.unitPrice}
                   onChange={(event) =>
                     setLines(
@@ -353,6 +374,7 @@ export function InvoicesPage() {
                   fullWidth
                   type="number"
                   label="Tax %"
+                  slotProps={{ htmlInput: { min: 0, max: 100, step: 0.01 } }}
                   value={line.taxRate}
                   onChange={(event) =>
                     setLines(
@@ -370,6 +392,7 @@ export function InvoicesPage() {
                   fullWidth
                   type="number"
                   label="Discount"
+                  slotProps={{ htmlInput: { min: 0, max: 9_999_999_999.99, step: 0.01 } }}
                   value={line.discount}
                   onChange={(event) =>
                     setLines(
@@ -388,12 +411,14 @@ export function InvoicesPage() {
         <Button
           startIcon={<Add />}
           onClick={() => setLines([...lines, newLine()])}
+          disabled={lines.length >= 100}
         >
           Add line
         </Button>
         <TextField
           type="number"
           label="Invoice discount"
+          slotProps={{ htmlInput: { min: 0, max: 9_999_999_999.99, step: 0.01 } }}
           value={discount}
           onChange={(event) => setDiscount(event.target.value)}
         />
@@ -404,8 +429,8 @@ export function InvoicesPage() {
           value={terms}
           onChange={(event) => setTerms(event.target.value)}
         />
-        <Alert severity="info">
-          Estimated total: KES {Math.max(subtotal, 0).toLocaleString()}
+        <Alert severity={preview.valid ? "info" : "warning"}>
+          {preview.valid ? `Estimated total: KES ${preview.total.toLocaleString()}` : preview.message}
         </Alert>
       </FormDialog>
     </>
@@ -458,6 +483,7 @@ export function InvoiceDetailPage() {
   if (query.error || !query.data)
     return <ErrorBlock message={apiMessage(query.error)} />;
   const invoice = query.data;
+  const kraEnabled = invoice.kraEnabled ?? invoice.business.taxSettings?.etimsEnabled === true;
   return (
     <>
       <Button
@@ -470,7 +496,7 @@ export function InvoiceDetailPage() {
       </Button>
       <PageHeader
         title={invoice.number}
-        description={`${invoice.customer.fullName} · ${invoice.repair?.reference ?? "General invoice"}`}
+        description={`${invoice.customer.fullName} · ${invoice.digitalTicket?.reference ?? invoice.repair?.reference ?? "General invoice"}`}
         actions={
           <Stack direction="row" flexWrap="wrap" gap={1}>
             <Button
@@ -512,7 +538,7 @@ export function InvoiceDetailPage() {
           {notice}
         </Alert>
       )}
-      {user?.role === "BUSINESS_ADMIN" && <InvoiceManagementPanel invoiceId={id} status={invoice.status} paymentStatus={invoice.paymentStatus} kraEtimsStatus={invoice.kraStatus} invoiceDiscount={invoice.invoiceLevelDiscount} dueAt={invoice.dueAt} terms={invoice.terms} notes={invoice.notes} items={invoice.items} refresh={refresh} />}
+      {user?.role === "BUSINESS_ADMIN" && <InvoiceManagementPanel invoiceId={id} status={invoice.status} paymentStatus={invoice.paymentStatus} kraEtimsStatus={invoice.kraStatus} kraEnabled={kraEnabled} manualDigital={Boolean(invoice.digitalTicketId || invoice.digitalTicket)} invoiceDiscount={invoice.invoiceLevelDiscount} dueAt={invoice.dueAt} terms={invoice.terms} notes={invoice.notes} items={invoice.items} refresh={refresh} />}
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, lg: 8 }}>
           <Card>
@@ -523,14 +549,14 @@ export function InvoiceDetailPage() {
                 gap={2}
               >
                 <Box>
-                  {invoice.business.logoUrl && <Box component="img" src={invoice.business.logoUrl} alt={`${invoice.business.name} logo`} sx={{ maxWidth: 180, maxHeight: 72, objectFit: "contain", mb: 1 }} />}
+                  {invoice.business.logoImageUrl && <Box component="img" src={invoice.business.logoImageUrl} alt={`${invoice.business.name} logo`} sx={{ maxWidth: 180, maxHeight: 100, objectFit: "contain", mb: 1 }} />}
                   <Typography variant="h5">{invoice.business.name}</Typography>
                   <Typography color="text.secondary">
                     {invoice.business.address}
                     <br />
                     {invoice.business.email} · {invoice.business.phone}
                   </Typography>
-                  {invoice.business.taxPin && <Typography variant="caption">KRA PIN: {invoice.business.taxPin}</Typography>}
+                  {kraEnabled && invoice.business.taxPin && <Typography variant="caption">KRA PIN: {invoice.business.taxPin}</Typography>}
                 </Box>
                 <Box textAlign={{ sm: "right" }}>
                   <StatusChip status={invoice.status} />

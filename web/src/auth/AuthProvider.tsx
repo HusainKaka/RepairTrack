@@ -7,7 +7,6 @@ interface AuthContextValue {
   user: User | null;
   loading: boolean;
   login(email: string, password: string): Promise<void>;
-  loginWithGoogle(idToken: string): Promise<void>;
   logout(): Promise<void>;
   hasRole(...roles: Role[]): boolean;
 }
@@ -39,16 +38,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
     applySession(data.data);
   }, [applySession]);
 
-  const loginWithGoogle = useCallback(async (idToken: string) => {
-    const { data } = await api.post<ApiEnvelope<SessionResponse>>("/auth/google", { idToken });
-    applySession(data.data);
-  }, [applySession]);
-
   const logout = useCallback(async () => {
     try { await api.post("/auth/logout"); } finally { setAccessToken(null); queryClient.clear(); setUser(null); }
   }, [queryClient]);
 
-  const value = useMemo<AuthContextValue>(() => ({ user, loading, login, loginWithGoogle, logout, hasRole: (...roles) => Boolean(user && roles.includes(user.role)) }), [loading, login, loginWithGoogle, logout, user]);
+  const value = useMemo<AuthContextValue>(() => ({ user, loading, login, logout, hasRole: (...roles) => Boolean(user && roles.includes(user.role)) }), [loading, login, logout, user]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

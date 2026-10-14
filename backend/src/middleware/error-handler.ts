@@ -15,6 +15,14 @@ export function errorHandler(error: unknown, request: Request, response: Respons
     response.status(409).json({ success: false, code: "DUPLICATE_RESOURCE", message: "A record with these details already exists.", errors: {}, requestId: request.requestId });
     return;
   }
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+    response.status(409).json({ success: false, code: "RESOURCE_CHANGED", message: "The record changed during this operation. Reload it and try again.", errors: {}, requestId: request.requestId });
+    return;
+  }
+  if (error && typeof error === "object" && "type" in error && error.type === "entity.too.large") {
+    response.status(413).json({ success: false, code: "PAYLOAD_TOO_LARGE", message: "The request exceeds the permitted size.", errors: {}, requestId: request.requestId });
+    return;
+  }
   if (error instanceof SyntaxError && "body" in error) {
     response.status(400).json({ success: false, code: "INVALID_JSON", message: "The request body contains invalid JSON.", errors: {}, requestId: request.requestId });
     return;

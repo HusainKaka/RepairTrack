@@ -34,6 +34,7 @@ import { ExpensesPage } from "./pages/ExpensePages";
 import { LoginPage } from "./pages/LoginPage";
 import { RepairDetailPage, RepairsPage } from "./pages/RepairPages";
 import { SubscriptionsPage } from "./pages/SubscriptionPages";
+import { DigitalServiceDetailPage, DigitalServicesPage, PublicDigitalTrackPage } from "./pages/DigitalServicePages";
 
 function NotFoundPage() {
   return (
@@ -65,6 +66,7 @@ export function App() {
       <Route path="/verify-email" element={<VerifyEmailPage />} />
       <Route path="/track" element={<PublicTrackPage />} />
       <Route path="/track/:token" element={<PublicTrackPage />} />
+      <Route path="/track/digital/:token" element={<PublicDigitalTrackPage />} />
       <Route element={<ProtectedRoute />}>
         <Route element={<AppShell />}>
           <Route index element={<DashboardPage />} />
@@ -78,6 +80,8 @@ export function App() {
           >
             <Route path="repairs" element={<RepairsPage />} />
             <Route path="repairs/:id" element={<RepairDetailPage />} />
+            <Route path="digital-services" element={<DigitalServicesPage />} />
+            <Route path="digital-services/:id" element={<DigitalServiceDetailPage />} />
             <Route path="notifications" element={<NotificationsPage />} />
           </Route>
           <Route

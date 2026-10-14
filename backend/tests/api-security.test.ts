@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken";
+import { Prisma } from "../src/generated/prisma/index.js";
 import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const prisma = vi.hoisted(() => ({ session: { findFirst: vi.fn(), updateMany: vi.fn().mockResolvedValue({ count: 1 }) }, device: { findFirst: vi.fn() }, inventoryItem: { findFirst: vi.fn(), update: vi.fn() }, supplier: { findFirst: vi.fn() }, repair: { findUnique: vi.fn() }, $transaction: vi.fn() }));
@@ -14,6 +15,19 @@ const accessToken = (role = "CUSTOMER") => jwt.sign({ sid: sessionId, role, busi
 beforeEach(() => { vi.mocked(prisma.session.findFirst).mockReset(); vi.mocked(prisma.session.findFirst).mockResolvedValue(activeSession() as never); });
 
 describe("API security boundary", () => {
+  it("returns a safe retry response for database transaction conflicts", async () => {
+    prisma.device.findFirst.mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError("private query details", { code: "P2034", clientVersion: "6.19.3" }));
+    const response = await request(app).get("/api/v1/devices/44444444-4444-4444-8444-444444444444").set("authorization", `Bearer ${accessToken()}`).expect(409);
+    expect(response.body.code).toBe("RESOURCE_CHANGED");
+    expect(JSON.stringify(response.body)).not.toContain("private query details");
+  });
+  it("rejects oversized JSON requests without exposing input", async () => {
+    const response = await request(app).post("/api/v1/auth/login").send({ padding: "x".repeat(1_100_000) }).expect(413);
+    expect(response.body.code).toBe("PAYLOAD_TOO_LARGE");
+  });
+  it("does not expose the retired Google sign-in endpoint", async () => {
+    await request(app).post("/api/v1/auth/google").send({ idToken: "unused-token" }).expect(404);
+  });
   it("serves a minimal health response without leaking configuration", async () => {
     const response = await request(app).get("/health").expect(200);
     expect(response.body.success).toBe(true);

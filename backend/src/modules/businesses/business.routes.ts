@@ -1,9 +1,11 @@
 import { AccountStatus, BusinessStatus, RoleCode } from "../../generated/prisma/index.js";
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { env } from "../../config/env.js";
 import { AppError, notFound } from "../../errors/app-error.js";
 import { writeAudit } from "../../lib/audit.js";
+import { BUSINESS_LOGO_KEY, getBusinessLogoDataUrl, MAX_LOGO_DATA_URL_LENGTH, normalizeBusinessLogo } from "../../lib/business-logo.js";
 import { createOpaqueToken, hashToken } from "../../lib/crypto.js";
 import { mailProvider } from "../../lib/mail.js";
 import { prisma } from "../../lib/prisma.js";
@@ -16,7 +18,6 @@ router.use(authenticate);
 
 const businessSchema = z.object({
   name: z.string().trim().min(2).max(160),
-  logoUrl: z.url().refine((value) => value.startsWith("https://"), "Logo URL must use HTTPS").optional(),
   registrationNumber: z.string().trim().min(2).max(80),
   taxPin: z.string().trim().min(2).max(80),
   email: z.email(),
@@ -61,7 +62,7 @@ router.post("/", authorize(RoleCode.SUPER_ADMIN), validate(businessSchema), asyn
   const inviteToken = createOpaqueToken();
   const result = await prisma.$transaction(async (tx) => {
     const adminRole = await tx.role.upsert({ where: { code: RoleCode.BUSINESS_ADMIN }, update: {}, create: { code: RoleCode.BUSINESS_ADMIN, name: "Business Administrator" } });
-    const business = await tx.business.create({ data: { name: input.name, logoUrl: input.logoUrl, registrationNumber: input.registrationNumber, taxPin: input.taxPin, email: input.email.toLowerCase(), phone: input.phone, whatsapp: input.whatsapp, address: input.address, city: input.city, country: input.country, currency: input.currency.toUpperCase(), taxRate: input.taxRate, defaultLabourCharge: input.defaultLabourCharge, allowInvoicePriceOverride: input.allowInvoicePriceOverride, receiptFooter: input.receiptFooter, invoiceFooter: input.invoiceFooter, workingHours: input.workingHours, timeZone: input.timeZone } });
+    const business = await tx.business.create({ data: { name: input.name, registrationNumber: input.registrationNumber, taxPin: input.taxPin, email: input.email.toLowerCase(), phone: input.phone, whatsapp: input.whatsapp, address: input.address, city: input.city, country: input.country, currency: input.currency.toUpperCase(), taxRate: input.taxRate, defaultLabourCharge: input.defaultLabourCharge, allowInvoicePriceOverride: input.allowInvoicePriceOverride, receiptFooter: input.receiptFooter, invoiceFooter: input.invoiceFooter, workingHours: input.workingHours, timeZone: input.timeZone } });
     const starterPlan = await tx.subscriptionPlan.upsert({ where: { name: "Starter" }, update: {}, create: { name: "Starter", monthlyPrice: 2500, annualPrice: 25000, currency: "KES", trialDays: 14, repairLimit: 100, technicianLimit: 2, businessUserLimit: 3, storageMb: 1024, features: { inventory: true, reports: false, whatsapp: false, kraEtims: false } } });
     await tx.businessSubscription.create({ data: { businessId: business.id, planId: starterPlan.id, status: "TRIAL", trialEnd: new Date(Date.now() + starterPlan.trialDays * 24 * 60 * 60_000) } });
     const admin = await tx.user.create({ data: { businessId: business.id, roleId: adminRole.id, email: input.administrator.email.toLowerCase(), fullName: input.administrator.fullName, phone: input.administrator.phone, status: AccountStatus.PENDING_VERIFICATION } });
@@ -86,7 +87,29 @@ router.patch("/:id/status", authorize(RoleCode.SUPER_ADMIN), validate(z.object({
 router.get("/profile", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN), async (request, response) => {
   const business = await prisma.business.findFirst({ where: { id: requireBusiness(request), deletedAt: null }, include: { taxSettings: true, subscription: { include: { plan: true } } } });
   if (!business) throw notFound("Business");
-  response.json({ success: true, data: business });
+  response.json({ success: true, data: { ...business, logoUrl: undefined, logoImageUrl: await getBusinessLogoDataUrl(business.id) } });
+});
+
+router.put("/profile/logo", authorize(RoleCode.BUSINESS_ADMIN), rateLimit({ windowMs: 15 * 60_000, limit: 10, keyGenerator: request => request.auth!.userId, standardHeaders: "draft-8", legacyHeaders: false }), validate(z.object({ imageDataUrl: z.string().min(30).max(MAX_LOGO_DATA_URL_LENGTH) }).strict()), async (request, response) => {
+  const businessId = requireBusiness(request);
+  const logo = await normalizeBusinessLogo(request.body.imageDataUrl);
+  await prisma.$transaction(async tx => {
+    await tx.setting.upsert({ where: { scope_key: { scope: `business:${businessId}`, key: BUSINESS_LOGO_KEY } }, update: { value: { dataUrl: logo.dataUrl, width: logo.width, height: logo.height } }, create: { businessId, scope: `business:${businessId}`, key: BUSINESS_LOGO_KEY, value: { dataUrl: logo.dataUrl, width: logo.width, height: logo.height } } });
+    // Do not retain a user-supplied remote fetch target after switching to uploads.
+    await tx.business.update({ where: { id: businessId }, data: { logoUrl: null } });
+    await writeAudit(tx, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "BUSINESS_LOGO_UPLOADED", resourceType: "business", resourceId: businessId, metadata: { width: logo.width, height: logo.height, bytes: logo.bytes.length } });
+  });
+  response.json({ success: true, data: { logoImageUrl: logo.dataUrl } });
+});
+
+router.delete("/profile/logo", authorize(RoleCode.BUSINESS_ADMIN), async (request, response) => {
+  const businessId = requireBusiness(request);
+  await prisma.$transaction(async tx => {
+    await tx.setting.deleteMany({ where: { businessId, scope: `business:${businessId}`, key: BUSINESS_LOGO_KEY } });
+    await tx.business.update({ where: { id: businessId }, data: { logoUrl: null } });
+    await writeAudit(tx, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "BUSINESS_LOGO_REMOVED", resourceType: "business", resourceId: businessId });
+  });
+  response.status(204).end();
 });
 
 router.patch("/profile", authorize(RoleCode.BUSINESS_ADMIN), validate(businessSchema.omit({ administrator: true, registrationNumber: true }).partial()), async (request, response) => {

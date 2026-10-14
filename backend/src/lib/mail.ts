@@ -6,7 +6,7 @@ export interface MailMessage {
   subject: string;
   text: string;
   html?: string;
-  attachments?: Array<{ filename: string; content: Buffer; contentType: string }>;
+  attachments?: Array<{ filename: string; content: Buffer; contentType: string; cid?: string }>;
 }
 
 export interface MailProvider {

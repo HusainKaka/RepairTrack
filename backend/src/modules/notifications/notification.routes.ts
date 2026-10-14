@@ -1,13 +1,25 @@
 import { Router } from "express";
-import { NotificationCategory } from "../../generated/prisma/index.js";
+import { NotificationCategory, NotificationChannel, RoleCode } from "../../generated/prisma/index.js";
 import { z } from "zod";
 import { notFound } from "../../errors/app-error.js";
 import { prisma } from "../../lib/prisma.js";
 import { authenticate } from "../../middleware/authenticate.js";
-import { validate } from "../../middleware/validate.js";
+import { authorize, requireBusiness } from "../../middleware/authorize.js";
+import { routeParam, validate } from "../../middleware/validate.js";
+import { retryWhatsAppNotification } from "./notification.service.js";
 
 const router = Router();
 router.use(authenticate);
+
+router.get("/delivery", authorize(RoleCode.BUSINESS_ADMIN), async (request, response) => {
+  const items = await prisma.notification.findMany({ where: { businessId: requireBusiness(request), channel: { in: [NotificationChannel.EMAIL, NotificationChannel.WHATSAPP] } }, select: { id: true, channel: true, status: true, subject: true, failureReason: true, createdAt: true, sentAt: true, repair: { select: { reference: true } }, digitalTicket: { select: { reference: true } } }, orderBy: { createdAt: "desc" }, take: 50 });
+  response.json({ success: true, data: items });
+});
+
+router.post("/delivery/:id/retry", authorize(RoleCode.BUSINESS_ADMIN), async (request, response) => {
+  await retryWhatsAppNotification(routeParam(request.params.id), requireBusiness(request));
+  response.status(202).json({ success: true, data: { message: "Delivery attempt completed. Check the delivery status; a provider acknowledgement is required before it is marked sent." } });
+});
 
 router.get("/", async (request, response) => {
   const category = typeof request.query.category === "string" && Object.values(NotificationCategory).includes(request.query.category as NotificationCategory) ? request.query.category as NotificationCategory : undefined;

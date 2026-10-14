@@ -3,7 +3,7 @@ import type { Prisma } from "../generated/prisma/index.js";
 export async function nextDocumentNumber(
   tx: Prisma.TransactionClient,
   businessId: string,
-  kind: "repair" | "invoice" | "payment" | "receipt",
+  kind: "repair" | "digital-ticket" | "invoice" | "payment" | "receipt",
   prefix: string
 ): Promise<string> {
   const counter = await tx.sequenceCounter.upsert({
