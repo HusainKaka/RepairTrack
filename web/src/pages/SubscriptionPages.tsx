@@ -9,6 +9,7 @@ import {
   Grid,
   MenuItem,
   Paper,
+  LinearProgress,
   Stack,
   TextField,
   Typography,
@@ -21,6 +22,7 @@ import { DataTable, FormDialog, KeyValue } from "../components/DataViews";
 import { ErrorBlock, LoadingBlock } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { StatusChip } from "../components/StatusChip";
+import { repairDate, sentenceCase } from "../components/repair/repairPresentation";
 import type { ApiEnvelope } from "../types";
 
 interface Plan {
@@ -65,16 +67,20 @@ interface ManagedSubscription extends CurrentSubscription {
 
 export function SubscriptionsPage() {
   const { user } = useAuth();
+  const canView = user?.role === "BUSINESS_ADMIN" || user?.role === "SUPER_ADMIN";
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<ManagedSubscription | null>(null);
   const [planId, setPlanId] = useState("");
   const [status, setStatus] = useState("ACTIVE");
   const [billingCycle, setBillingCycle] = useState("MONTHLY");
   const [reason, setReason] = useState("");
+  const [reviewPlan, setReviewPlan] = useState<Plan | null>(null);
+  const [notice, setNotice] = useState("");
   const plans = useQuery({
     queryKey: ["subscription-plans"],
     queryFn: async () =>
       (await api.get<ApiEnvelope<Plan[]>>("/subscriptions/plans")).data.data,
+    enabled: canView,
   });
   const current = useQuery({
     queryKey: ["subscription-current"],
@@ -99,6 +105,7 @@ export function SubscriptionsPage() {
   const checkout = useMutation({
     mutationFn: (value: { planId: string; billingCycle: string }) =>
       api.post("/subscriptions/checkout", value),
+    onSuccess: async () => { setReviewPlan(null); setNotice("Checkout request acknowledged. This does not confirm payment or activate a plan; activation requires verified provider confirmation."); await queryClient.invalidateQueries({ queryKey: ["subscription-current"] }); },
   });
   const override = useMutation({
     mutationFn: () =>
@@ -111,17 +118,20 @@ export function SubscriptionsPage() {
     onSuccess: async () => {
       setSelected(null);
       setReason("");
+      setNotice("Subscription override saved with its audit reason.");
       await queryClient.invalidateQueries({
         queryKey: ["subscription-businesses"],
       });
     },
   });
+  if (!canView) return <ErrorBlock message="Subscription management is available to administrators." />;
   if (plans.isLoading || current.isLoading || businesses.isLoading)
-    return <LoadingBlock />;
+    return <LoadingBlock label="Loading subscription details" />;
   if (plans.error || current.error || businesses.error)
     return (
       <ErrorBlock
         message={apiMessage(plans.error ?? current.error ?? businesses.error)}
+        retry={() => { void plans.refetch(); if (user?.role === "BUSINESS_ADMIN") void current.refetch(); if (user?.role === "SUPER_ADMIN") void businesses.refetch(); }}
       />
     );
   if (user?.role === "SUPER_ADMIN")
@@ -131,7 +141,12 @@ export function SubscriptionsPage() {
           title="Subscription manager"
           description="Control business plans and lifecycle state. Every manual override is recorded in the audit trail."
         />
+        {notice && <Alert severity="success" role="status" onClose={() => setNotice("")} sx={{ mb: 2 }}>{notice}</Alert>}
+        {businesses.isFetching && <LinearProgress aria-label="Refreshing subscriptions" sx={{ mb: 2 }} />}
         <DataTable
+          caption="Business subscription lifecycle records"
+          rowKeys={businesses.data?.map((item) => item.id)}
+          mobileSummaryColumns={[0, 3]}
           columns={[
             "Business",
             "Plan",
@@ -148,13 +163,15 @@ export function SubscriptionsPage() {
               </Typography>
             </Box>,
             item.plan.name,
-            item.billingCycle,
+            sentenceCase(item.billingCycle),
             <StatusChip status={item.status} />,
             item.currentPeriodEnd
-              ? new Date(item.currentPeriodEnd).toLocaleDateString()
+              ? repairDate(item.currentPeriodEnd)
               : "—",
             <Button
               onClick={() => {
+                override.reset();
+                setReason("");
                 setSelected(item);
                 setPlanId(item.plan.id);
                 setStatus(item.status);
@@ -173,6 +190,9 @@ export function SubscriptionsPage() {
           onClose={() => setSelected(null)}
           onSubmit={() => override.mutate()}
           submitLabel="Apply audited override"
+          submitDisabled={reason.trim().length < 3 || !planId}
+          dirty={Boolean(reason) || Boolean(selected && (planId !== selected.plan.id || status !== selected.status || billingCycle !== selected.billingCycle))}
+          description="This changes the business's plan and lifecycle state directly. It is not a payment and must include a clear audit reason."
         >
           <TextField
             select
@@ -210,7 +230,7 @@ export function SubscriptionsPage() {
               "EXPIRED",
             ].map((value) => (
               <MenuItem value={value} key={value}>
-                {value.replaceAll("_", " ")}
+                {sentenceCase(value)}
               </MenuItem>
             ))}
           </TextField>
@@ -219,6 +239,7 @@ export function SubscriptionsPage() {
             multiline
             minRows={2}
             label="Reason for override"
+            inputProps={{ minLength: 3, maxLength: 500 }}
             value={reason}
             onChange={(event) => setReason(event.target.value)}
           />
@@ -236,6 +257,8 @@ export function SubscriptionsPage() {
         title="Plan & subscription"
         description="Review your RepairTrack plan, renewal period, enabled features, and verified payment history."
       />
+      {notice && <Alert severity="info" role="status" onClose={() => setNotice("")} sx={{ mb: 2 }}>{notice}</Alert>}
+      {current.isFetching && <LinearProgress aria-label="Refreshing subscription details" sx={{ mb: 2 }} />}
       <Alert
         severity={
           subscription.status === "ACTIVE" || subscription.status === "TRIAL"
@@ -263,7 +286,7 @@ export function SubscriptionsPage() {
               <Stack spacing={2} mt={3}>
                 <KeyValue
                   label="Billing cycle"
-                  value={subscription.billingCycle}
+                  value={sentenceCase(subscription.billingCycle)}
                 />
                 <KeyValue
                   label="Monthly price"
@@ -306,6 +329,7 @@ export function SubscriptionsPage() {
             <Typography variant="h6" mb={2}>
               Available plans
             </Typography>
+            <Typography variant="body2" color="text.secondary" mb={2}>Compare monthly options before continuing. The current backend requires external checkout setup and may report that checkout is unavailable; it will not activate an unpaid plan.</Typography>
             <Grid container spacing={2}>
               {(plans.data ?? []).map((plan) => (
                 <Grid key={plan.id} size={{ xs: 12, md: 6 }}>
@@ -325,24 +349,19 @@ export function SubscriptionsPage() {
                         disabled={
                           plan.id === subscription.plan.id || checkout.isPending
                         }
-                        onClick={() =>
-                          checkout.mutate({
-                            planId: plan.id,
-                            billingCycle: "MONTHLY",
-                          })
-                        }
+                        onClick={() => { checkout.reset(); setReviewPlan(plan); }}
                       >
                         {plan.id === subscription.plan.id
                           ? "Current plan"
-                          : "Choose plan"}
+                          : `Review ${plan.name}`}
                       </Button>
                     </CardContent>
                   </Card>
                 </Grid>
               ))}
             </Grid>
-            {checkout.error && (
-              <Alert severity="info" sx={{ mt: 2 }}>
+            {checkout.error && !reviewPlan && (
+              <Alert severity="error" sx={{ mt: 2 }}>
                 {apiMessage(checkout.error)}
               </Alert>
             )}
@@ -361,6 +380,9 @@ export function SubscriptionsPage() {
               </Typography>
               {subscription.payments.length ? (
                 <DataTable
+                  caption="Recent subscription payment records · activation requires provider verification"
+                  rowKeys={subscription.payments.map((payment) => payment.id)}
+                  mobileSummaryColumns={[0, 2]}
                   columns={[
                     "Transaction",
                     "Provider",
@@ -374,7 +396,7 @@ export function SubscriptionsPage() {
                     `${payment.currency} ${Number(payment.amount).toLocaleString()}`,
                     <StatusChip status={payment.status} />,
                     payment.paidAt
-                      ? new Date(payment.paidAt).toLocaleString()
+                      ? repairDate(payment.paidAt, true)
                       : "—",
                   ])}
                 />
@@ -387,6 +409,9 @@ export function SubscriptionsPage() {
           </Card>
         </Grid>
       </Grid>
+      <FormDialog open={Boolean(reviewPlan)} title={`Review ${reviewPlan?.name ?? "plan"}`} description="Review the monthly price before requesting checkout. Your plan does not change until payment is independently verified." busy={checkout.isPending} error={checkout.error ? apiMessage(checkout.error) : undefined} onClose={() => setReviewPlan(null)} onSubmit={() => { if (reviewPlan) checkout.mutate({ planId: reviewPlan.id, billingCycle: "MONTHLY" }); }} submitLabel="Continue to checkout">
+        <KeyValue label="Selected plan" value={reviewPlan?.name} /><KeyValue label="Monthly price" value={reviewPlan ? `${reviewPlan.currency} ${Number(reviewPlan.monthlyPrice).toLocaleString()}` : ""} /><KeyValue label="Billing cycle" value="Monthly" /><Alert severity="info">No payment or activation is confirmed by opening this form. If the provider is unavailable, the error will be shown here and your current plan remains unchanged.</Alert>
+      </FormDialog>
     </>
   );
 }

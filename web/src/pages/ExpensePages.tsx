@@ -4,24 +4,31 @@ import Download from "@mui/icons-material/Download";
 import EditOutlined from "@mui/icons-material/EditOutlined";
 import {
   Alert,
+  Box,
   Button,
   Card,
   CardContent,
   Grid,
+  Divider,
+  FormControlLabel,
   IconButton,
   MenuItem,
   Paper,
+  LinearProgress,
   Stack,
+  Switch,
   TextField,
   Tooltip,
   Typography,
 } from "@mui/material";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, apiMessage } from "../api/client";
+import { useAuth } from "../auth/AuthProvider";
 import { DataTable, FormDialog, KeyValue } from "../components/DataViews";
 import { EmptyState, ErrorBlock, LoadingBlock } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
+import { repairDate, sentenceCase } from "../components/repair/repairPresentation";
 import type { ApiEnvelope } from "../types";
 
 const categories = [
@@ -86,11 +93,12 @@ async function downloadExpenses(from: string, to: string) {
   const link = document.createElement("a");
   link.href = url;
   link.download = "repairtrack-expenses.csv";
-  link.click();
-  URL.revokeObjectURL(url);
+  try { link.click(); } finally { URL.revokeObjectURL(url); }
 }
 
 export function ExpensesPage() {
+  const { user } = useAuth();
+  const admin = user?.role === "BUSINESS_ADMIN";
   const queryClient = useQueryClient();
   const [from, setFrom] = useState(() => {
     const date = new Date();
@@ -104,15 +112,19 @@ export function ExpensesPage() {
   const [editing, setEditing] = useState<Expense | null>(null);
   const [remove, setRemove] = useState<Expense | null>(null);
   const [reason, setReason] = useState("");
+  const [notice, setNotice] = useState("");
   const query = useQuery({
     queryKey: ["expenses", from, to, utilityOnly],
+    placeholderData: keepPreviousData,
     queryFn: async () =>
       (
         await api.get<ApiEnvelope<ExpenseResponse>>("/expenses", {
           params: { from, to, utility: utilityOnly || undefined },
         })
       ).data.data,
+    enabled: admin,
   });
+  const download = useMutation({ mutationFn: () => downloadExpenses(from, to), onSuccess: () => setNotice("Expense CSV prepared for download. It includes all categories in the selected date range.") });
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: ["expenses"] });
   const save = useMutation({
@@ -136,6 +148,7 @@ export function ExpensesPage() {
       setFormOpen(false);
       setEditing(null);
       setForm(empty);
+      setNotice(editing ? "Expense changes saved." : "Expense recorded.");
       await refresh();
     },
   });
@@ -145,17 +158,20 @@ export function ExpensesPage() {
     onSuccess: async () => {
       setRemove(null);
       setReason("");
+      setNotice("Expense voided. The audit record has been preserved.");
       await refresh();
     },
   });
-  if (query.isLoading) return <LoadingBlock />;
+  if (!admin) return <ErrorBlock message="Costs and utilities are available to the business administrator." />;
+  if (query.isLoading) return <LoadingBlock label="Loading operating costs" />;
   if (query.error || !query.data)
-    return <ErrorBlock message={apiMessage(query.error)} />;
+    return <ErrorBlock message={apiMessage(query.error)} retry={() => void query.refetch()} />;
   const data = query.data;
   const utilities = data.items.filter((item) =>
     utilityCategories.has(item.category),
   );
   const openEdit = (item: Expense) => {
+    save.reset();
     setEditing(item);
     setForm({
       category: item.category,
@@ -176,18 +192,20 @@ export function ExpensesPage() {
         title="Costs & utilities"
         description="Record operating expenses and utility bills for cash-basis profit reporting."
         actions={
-          <Stack direction="row" gap={1}>
+          <Stack direction="row" flexWrap="wrap" gap={1}>
             <Button
               startIcon={<Download />}
-              onClick={() => void downloadExpenses(from, to)}
+              disabled={download.isPending}
+              onClick={() => download.mutate()}
             >
-              Export CSV
+              {download.isPending ? "Preparing CSV…" : "Export CSV"}
             </Button>
             <Button
               variant="contained"
               startIcon={<Add />}
               onClick={() => {
                 setEditing(null);
+                save.reset();
                 setForm(empty);
                 setFormOpen(true);
               }}
@@ -197,6 +215,8 @@ export function ExpensesPage() {
           </Stack>
         }
       />
+      {notice && <Alert severity="success" role="status" onClose={() => setNotice("")} sx={{ mb: 2 }}>{notice}</Alert>}
+      {download.error && <Alert severity="error" sx={{ mb: 2 }} action={<Button color="inherit" onClick={() => download.mutate()} disabled={download.isPending}>Try again</Button>}>CSV could not be prepared. {apiMessage(download.error)}</Alert>}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Stack direction={{ xs: "column", sm: "row" }} gap={2}>
           <TextField
@@ -214,65 +234,47 @@ export function ExpensesPage() {
             InputLabelProps={{ shrink: true }}
           />
           <Button
+            aria-pressed={utilityOnly}
             variant={utilityOnly ? "contained" : "outlined"}
             onClick={() => setUtilityOnly((value) => !value)}
           >
             {utilityOnly ? "Showing utilities" : "Show utilities only"}
           </Button>
         </Stack>
+        <Typography variant="caption" color="text.secondary" display="block" mt={2} role="status">{query.isPlaceholderData ? "Updating the selected range. Figures still describe the previous loaded view." : <>Totals describe up to 500 loaded entries in this range{utilityOnly ? ", restricted to utilities" : ""}.</>} CSV export includes all categories in the date range, even when the utility filter is on.</Typography>
+        {from && to && from > to && <Alert severity="warning" sx={{ mt: 2 }}>The start date is after the end date. Choose a valid reporting range.</Alert>}
+        {query.isFetching && <LinearProgress aria-label="Refreshing expenses" sx={{ mt: 2 }} />}
       </Paper>
-      <Grid container spacing={2.5} mb={3}>
-        <Grid size={{ xs: 12, md: 4 }}>
-          <Card>
-            <CardContent>
-              <KeyValue
-                label="Expenses in range"
-                value={`KES ${data.total.toLocaleString()}`}
-              />
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, md: 4 }}>
-          <Card>
-            <CardContent>
-              <KeyValue label="Entries" value={data.items.length} />
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid size={{ xs: 12, md: 4 }}>
-          <Card>
-            <CardContent>
-              <KeyValue label="Utility entries" value={utilities.length} />
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      <Paper variant="outlined" sx={{ p: 3, mb: 3 }}><Grid container spacing={3}><Grid size={{ xs: 12, sm: 6, md: 4 }}><KeyValue label="Cost in loaded entries" value={`KES ${data.total.toLocaleString()}`} /></Grid><Grid size={{ xs: 6, md: 4 }}><KeyValue label="Loaded entries" value={data.items.length} /></Grid><Grid size={{ xs: 6, md: 4 }}><KeyValue label="Utility entries" value={utilities.length} /></Grid></Grid></Paper>
       {data.items.length ? (
         <DataTable
+          caption="Operating costs · selected date range"
+          rowKeys={data.items.map((item) => item.id)}
+          mobileSummaryColumns={[2, 4]}
           columns={[
             "Date",
             "Category",
             "Description",
             "Supplier",
             "Amount",
-            "Recurring",
+            "Recurring label",
             "Actions",
           ]}
           rows={data.items.map((item) => [
-            new Date(item.expenseDate).toLocaleDateString(),
-            item.category.replaceAll("_", " "),
+            repairDate(item.expenseDate),
+            sentenceCase(item.category),
             item.description,
             item.supplier ?? "—",
             `KES ${Number(item.amount).toLocaleString()}`,
-            item.recurring ? "Yes" : "No",
+            item.recurring ? "Recurring label" : "One-off",
             <Stack direction="row">
               <Tooltip title="Edit">
-                <IconButton onClick={() => openEdit(item)}>
+                <IconButton aria-label={`Edit expense: ${item.description}`} onClick={() => openEdit(item)}>
                   <EditOutlined />
                 </IconButton>
               </Tooltip>
               <Tooltip title="Void">
-                <IconButton color="error" onClick={() => setRemove(item)}>
+                <IconButton aria-label={`Void expense: ${item.description}`} color="error" onClick={() => { deletion.reset(); setReason(""); setRemove(item); }}>
                   <DeleteOutline />
                 </IconButton>
               </Tooltip>
@@ -292,6 +294,8 @@ export function ExpensesPage() {
           </Typography>
           {data.monthlyTotals.length ? (
             <DataTable
+              caption="Monthly totals from the loaded expense entries"
+              rowKeys={data.monthlyTotals.map((item) => item.month)}
               columns={["Month", "Total cost"]}
               rows={data.monthlyTotals.map((item) => [
                 item.month,
@@ -317,7 +321,9 @@ export function ExpensesPage() {
         }}
         onSubmit={() => save.mutate()}
         submitLabel={editing ? "Save changes" : "Add expense"}
+        description="Record an operating cost. Recurring is a reporting label, not an instruction to schedule a payment."
       >
+        <Box><Typography variant="h6" component="h2">Expense details</Typography><Typography variant="body2" color="text.secondary">Category, amount and the date this cost was recorded.</Typography></Box>
         <TextField
           select
           label="Category"
@@ -328,13 +334,14 @@ export function ExpensesPage() {
         >
           {categories.map((item) => (
             <MenuItem key={item} value={item}>
-              {item.replaceAll("_", " ")}
+              {sentenceCase(item)}
             </MenuItem>
           ))}
         </TextField>
         <TextField
           required
           label="Description"
+          inputProps={{ minLength: 2, maxLength: 300 }}
           value={form.description}
           onChange={(event) =>
             setForm({ ...form, description: event.target.value })
@@ -342,6 +349,7 @@ export function ExpensesPage() {
         />
         <TextField
           label="Supplier"
+          inputProps={{ maxLength: 160 }}
           value={form.supplier}
           onChange={(event) =>
             setForm({ ...form, supplier: event.target.value })
@@ -351,6 +359,7 @@ export function ExpensesPage() {
           required
           type="number"
           label="Amount (KES)"
+          inputProps={{ min: 0, max: 100000000 }}
           value={form.amount}
           onChange={(event) => setForm({ ...form, amount: event.target.value })}
         />
@@ -364,8 +373,10 @@ export function ExpensesPage() {
           }
           InputLabelProps={{ shrink: true }}
         />
+        <Divider /><Typography variant="subtitle2" component="h2">Supporting information</Typography>
         <TextField
           label="Reference"
+          inputProps={{ maxLength: 160 }}
           value={form.reference}
           onChange={(event) =>
             setForm({ ...form, reference: event.target.value })
@@ -373,6 +384,8 @@ export function ExpensesPage() {
         />
         <TextField
           label="HTTPS attachment URL"
+          type="url"
+          inputProps={{ pattern: "https://.*" }}
           value={form.attachmentUrl}
           onChange={(event) =>
             setForm({ ...form, attachmentUrl: event.target.value })
@@ -382,15 +395,12 @@ export function ExpensesPage() {
           multiline
           minRows={2}
           label="Notes"
+          inputProps={{ maxLength: 2000 }}
           value={form.notes}
           onChange={(event) => setForm({ ...form, notes: event.target.value })}
         />
-        <Button
-          variant={form.recurring ? "contained" : "outlined"}
-          onClick={() => setForm({ ...form, recurring: !form.recurring })}
-        >
-          {form.recurring ? "Recurring expense" : "Mark as recurring"}
-        </Button>
+        <FormControlLabel control={<Switch inputProps={{ role: "switch" }} checked={form.recurring} onChange={(event) => setForm({ ...form, recurring: event.target.checked })} />} label="Label this as a recurring expense" />
+        <Typography variant="caption" color="text.secondary">This label does not create future expenses or initiate automatic payments.</Typography>
       </FormDialog>
       <FormDialog
         open={Boolean(remove)}
@@ -400,6 +410,8 @@ export function ExpensesPage() {
         onClose={() => setRemove(null)}
         onSubmit={() => deletion.mutate()}
         submitLabel="Void expense"
+        submitDisabled={reason.trim().length < 3}
+        dirty={Boolean(reason)}
       >
         <Alert severity="warning">
           This keeps an auditable record and excludes the expense from active
@@ -408,6 +420,7 @@ export function ExpensesPage() {
         <TextField
           required
           label="Reason"
+          inputProps={{ minLength: 3, maxLength: 500 }}
           value={reason}
           onChange={(event) => setReason(event.target.value)}
           helperText="At least 3 characters"

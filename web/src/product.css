@@ -1,0 +1,72 @@
+/* Foreground only. theme.ts, styles.css and BrandBackdrop remain byte-identical.
+   No backdrop/scene/body/#root selectors or ancestor positioning overrides. */
+.product-ui {
+  --product-text: var(--brand-ink, #0f172a);
+  --product-muted: var(--brand-muted, #475569);
+  --product-surface: var(--glass-surface);
+  --product-surface-solid: var(--glass-solid);
+  --product-edge: var(--glass-border);
+  --product-space-1: 4px;
+  --product-space-2: 8px;
+  --product-space-3: 12px;
+  --product-space-4: 16px;
+  --product-space-6: 24px;
+  --product-space-8: 32px;
+  --product-radius-panel: 24px;
+  --product-radius-control: 12px;
+  color: var(--product-text);
+  font-variant-numeric: tabular-nums;
+}
+.product-ui :where(h1, h2, h3, h4, h5, h6) { text-wrap: balance; }
+.product-ui :where(p, dd) { overflow-wrap: anywhere; }
+.product-ui [hidden] { display: none !important; }
+.product-ui .MuiButton-root { min-height: 42px; flex-shrink: 0; }
+.product-ui .MuiIconButton-root { min-width: 44px; min-height: 44px; }
+.product-ui .MuiButton-text { padding-inline: 8px; white-space: normal; }
+.product-ui .MuiButton-root:focus-visible,
+.product-ui .MuiIconButton-root:focus-visible,
+.product-ui .MuiTab-root:focus-visible,
+.product-ui .MuiListItemButton-root:focus-visible,
+.product-ui a:focus-visible,
+.product-ui .product-table-scroll:focus-visible { outline: 3px solid #2563eb; outline-offset: 3px; }
+.product-ui .MuiCardContent-root { padding: 24px; }
+.product-ui .MuiCardContent-root:last-child { padding-bottom: 24px; }
+.product-ui .product-table { border-radius: var(--product-radius-panel); }
+.product-ui .product-table .MuiTableCell-head { font-size: 12px; line-height: 1.5; font-weight: 650; letter-spacing: .035em; padding: 15px 20px; white-space: nowrap; }
+.product-ui .product-table .MuiTableCell-body { padding: 16px 20px; font-size: 14px; line-height: 1.5; vertical-align: middle; }
+.product-ui .product-table .MuiTableRow-root:last-child .MuiTableCell-body { border-bottom: 0; }
+.product-ui .product-table .MuiButton-text { padding: 0; text-align: left; justify-content: flex-start; min-height: 32px; }
+.product-ui .MuiAlert-root { border-radius: 14px; align-items: flex-start; }
+.product-ui .MuiAlert-message { min-width: 0; overflow-wrap: anywhere; }
+.product-ui .MuiAlert-action { margin-left: 8px; flex-shrink: 0; }
+.product-ui .MuiTab-root { text-transform: none; font-weight: 650; min-height: 48px; }
+.product-ui .MuiDialogTitle-root { font-size: 23px; line-height: 1.3; letter-spacing: -.025em; font-weight: 700; }
+.product-ui .MuiDialogActions-root { border-top: 1px solid rgba(40,98,153,.14); }
+.product-ui .MuiDialogContent-root { scrollbar-gutter: stable; }
+.product-ui .MuiInputBase-root { font-size: 15px; }
+.product-ui .MuiChip-root { height: auto; min-height: 27px; }
+.product-ui .MuiChip-label { white-space: normal; overflow-wrap: normal; word-break: normal; padding-block: 4px; }
+.product-ui .product-record-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: break-word; word-break: normal; white-space: normal; min-width: 0; text-align: left; }
+.product-ui .product-table .MuiTableCell-body .MuiTypography-root { overflow-wrap: break-word; }
+.product-ui .MuiChip-outlined.MuiChip-colorPrimary,
+.product-ui .MuiTab-root.Mui-selected { color: #2563eb; }
+.product-ui .MuiChip-filled.MuiChip-colorPrimary { color: var(--product-text); background-color: rgba(59,130,246,.10); }
+.product-ui .MuiAlert-standardWarning,
+.product-ui .MuiAlert-outlinedWarning { color: var(--product-text); }
+.product-ui .product-section-heading { font-size: 18px; font-weight: 700; letter-spacing: -.02em; line-height: 1.4; }
+.product-ui .product-muted { color: var(--product-muted); }
+.product-ui .product-number { font-variant-numeric: tabular-nums; letter-spacing: -.035em; }
+@media (max-width: 599px) {
+  .product-ui .MuiCardContent-root { padding: 20px; }
+  .product-ui .MuiCardContent-root:last-child { padding-bottom: 20px; }
+  .product-ui .MuiDialog-paper { margin: 12px; width: calc(100% - 24px); max-height: calc(100% - 24px); }
+  .product-ui .MuiDialogContent-root, .product-ui .MuiDialogTitle-root { padding-inline: 20px; }
+  .product-ui .MuiDialogActions-root { flex-wrap: wrap; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .product-ui .MuiButton-root,
+  .product-ui .MuiIconButton-root,
+  .product-ui .MuiTab-root,
+  .product-ui .MuiListItemButton-root,
+  .product-ui .MuiCollapse-root { transition-duration: 0ms; }
+}

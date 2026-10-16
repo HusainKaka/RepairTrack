@@ -14,19 +14,22 @@ import {
   InputAdornment,
   MenuItem,
   Stack,
+  Paper,
+  TablePagination,
   TextField,
   Tooltip,
   Typography,
 } from "@mui/material";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, apiMessage } from "../api/client";
 import { useAuth } from "../auth/AuthProvider";
 import { CreateButton, DataTable, FormDialog } from "../components/DataViews";
 import { ErrorBlock, LoadingBlock } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { StatusChip } from "../components/StatusChip";
+import { RecordName } from "../components/product/RecordName";
 import type {
   ApiEnvelope,
   Business,
@@ -38,6 +41,18 @@ import type {
 
 function readableDate(value?: string) {
   return value ? new Date(value).toLocaleDateString() : "Never";
+}
+
+function DirectorySearch({ value, label, placeholder, onSearch, children }: { value: string; label: string; placeholder: string; onSearch(value: string): void; children?: React.ReactNode }) {
+  const [draft, setDraft] = useState(value);
+  return <Paper sx={{ p: 2.5, mb: 3 }}><Stack component="form" role="search" onSubmit={(event) => { event.preventDefault(); onSearch(draft.trim()); }} direction={{ xs: "column", md: "row" }} gap={2} alignItems={{ md: "center" }}>
+    <TextField fullWidth size="small" label={label} placeholder={placeholder} value={draft} onChange={(event) => setDraft(event.target.value)} />
+    {children}<Stack direction="row" gap={1}><Button variant="outlined" type="submit">Search</Button>{value && <Button type="button" onClick={() => { setDraft(""); onSearch(""); }}>Clear</Button>}</Stack>
+  </Stack></Paper>;
+}
+
+function ResultStatus({ count, busy, limit }: { count: number; busy: boolean; limit?: number }) {
+  return <Typography variant="caption" color="text.secondary" role="status" aria-live="polite" sx={{ display: "block", minHeight: 24, mb: 1 }}>{busy ? "Updating results…" : `${count} record(s) loaded${limit ? ` · Up to ${limit} matching records are returned` : ""}.`}</Typography>;
 }
 
 const emptyCustomer = {
@@ -54,13 +69,17 @@ const emptyCustomer = {
   notes: "",
 };
 export function CustomersPage() {
+  const { user } = useAuth();
+  const admin = user?.role === "BUSINESS_ADMIN";
+  const [params, setParams] = useSearchParams();
+  const search = params.get("q") ?? "";
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(emptyCustomer);
   const query = useQuery({
-    queryKey: ["customers"],
+    queryKey: ["customers", { search }],
     queryFn: async () =>
-      (await api.get<ApiEnvelope<Customer[]>>("/customers")).data.data,
+      (await api.get<ApiEnvelope<Customer[]>>("/customers", { params: { search: search || undefined } })).data.data,
   });
   const create = useMutation({
     mutationFn: () =>
@@ -91,9 +110,10 @@ export function CustomersPage() {
     <Button
       component={Link}
       to={`/customers/${customer.id}`}
+      state={{ directorySearch: params.toString() }}
       sx={{ p: 0, justifyContent: "flex-start" }}
     >
-      {customer.fullName}
+      <RecordName>{customer.fullName}</RecordName>
     </Button>,
     customer.phone,
     customer.email ?? "—",
@@ -106,22 +126,30 @@ export function CustomersPage() {
         title="Customers"
         description="Contact details and repair history remain scoped to this business."
         actions={
-          <CreateButton label="Add customer" onClick={() => setOpen(true)} />
+          admin ? <CreateButton label="Add customer" onClick={() => { create.reset(); setOpen(true); }} /> : undefined
         }
       />
+      <DirectorySearch key={search} value={search} label="Find a customer" placeholder="Name, email or phone number" onSearch={(value) => setParams(value ? { q: value } : {})} />
+      <ResultStatus count={query.data?.length ?? 0} busy={query.isFetching} limit={100} />
       <DataTable
         columns={["Customer", "Phone", "Email", "Devices", "Repairs"]}
         rows={rows}
-        empty="Add the first customer to begin a repair intake."
+        rowKeys={(query.data ?? []).map((customer) => customer.id)}
+        mobileSummaryColumns={[0]}
+        caption="Customer contacts and linked workshop history"
+        empty={search ? "No customers match this search. Try another name, email or phone, or clear the search." : admin ? "Add the first customer to begin a repair intake." : "No customer profiles are available in this business yet."}
       />
       <FormDialog
         open={open}
         title="Add customer"
+        description="Capture contact details first. WhatsApp messages require the customer's permission."
+        dirty={JSON.stringify(form) !== JSON.stringify(emptyCustomer)}
         busy={create.isPending}
         error={create.error ? apiMessage(create.error) : undefined}
         onClose={() => setOpen(false)}
         onSubmit={() => create.mutate()}
       >
+        <Typography component="h2" variant="subtitle2">Customer identity</Typography>
         <TextField
           required
           label="Full name"
@@ -133,17 +161,21 @@ export function CustomersPage() {
         <TextField
           required
           label="Phone"
+          type="tel"
+          autoComplete="tel"
           value={form.phone}
           onChange={(event) => setForm({ ...form, phone: event.target.value, whatsappOptIn: false })}
         />
         <TextField
           label="Alternative phone"
+          type="tel"
           value={form.alternativePhone}
           onChange={(event) =>
             setForm({ ...form, alternativePhone: event.target.value })
           }
         />
-        <TextField label="WhatsApp phone" value={form.whatsappPhone} onChange={(event) => setForm({ ...form, whatsappPhone: event.target.value, whatsappOptIn: false })} />
+        <Typography component="h2" variant="subtitle2">Communication preferences</Typography>
+        <TextField label="WhatsApp phone" type="tel" value={form.whatsappPhone} onChange={(event) => setForm({ ...form, whatsappPhone: event.target.value, whatsappOptIn: false })} />
         <FormControlLabel control={<Checkbox checked={form.whatsappOptIn} onChange={(event) => setForm({ ...form, whatsappOptIn: event.target.checked })} />} label="The customer has agreed to receive WhatsApp ticket and service updates at this number." />
         <Stack direction={{ xs: "column", sm: "row" }} gap={2}><TextField select fullWidth label="Customer type" value={form.customerType} onChange={(event) => setForm({ ...form, customerType: event.target.value })}><MenuItem value="INDIVIDUAL">Individual</MenuItem><MenuItem value="BUSINESS">Business</MenuItem></TextField><TextField fullWidth label="KRA PIN" value={form.kraPin} onChange={(event) => setForm({ ...form, kraPin: event.target.value.toUpperCase() })} /></Stack>
         <TextField select label="Preferred communication" value={form.preferredCommunication} onChange={(event) => setForm({ ...form, preferredCommunication: event.target.value })}><MenuItem value="EMAIL">Email</MenuItem><MenuItem value="WHATSAPP">WhatsApp</MenuItem></TextField>
@@ -189,20 +221,25 @@ const emptyDevice = {
   warrantyStatus: "",
 };
 export function DevicesPage() {
+  const { user } = useAuth();
+  const admin = user?.role === "BUSINESS_ADMIN";
+  const [params, setParams] = useSearchParams();
+  const search = params.get("q") ?? "";
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(emptyDevice);
   const [removing, setRemoving] = useState<Device | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
   const devices = useQuery({
-    queryKey: ["devices"],
+    queryKey: ["devices", { search }],
     queryFn: async () =>
-      (await api.get<ApiEnvelope<Device[]>>("/devices")).data.data,
+      (await api.get<ApiEnvelope<Device[]>>("/devices", { params: { search: search || undefined } })).data.data,
   });
   const customers = useQuery({
     queryKey: ["customers"],
     queryFn: async () =>
       (await api.get<ApiEnvelope<Customer[]>>("/customers")).data.data,
+    enabled: admin,
   });
   const create = useMutation({
     mutationFn: () =>
@@ -230,16 +267,14 @@ export function DevicesPage() {
   const deletion = useMutation({ mutationFn: () => api.delete(`/devices/${removing!.id}`, { data: { reason: deleteReason } }), onSuccess: async () => { setRemoving(null); setDeleteReason(""); await queryClient.invalidateQueries({ queryKey: ["devices"] }); } });
   if (devices.isLoading || customers.isLoading) return <LoadingBlock />;
   const issue = devices.error ?? customers.error;
-  if (issue) return <ErrorBlock message={apiMessage(issue)} />;
+  if (issue) return <ErrorBlock message={apiMessage(issue)} retry={() => { void devices.refetch(); if (admin) void customers.refetch(); }} />;
   const rows = (devices.data ?? []).map((device) => [
-    <Typography fontWeight={700}>
-      {device.brand} {device.model}
-    </Typography>,
+    <RecordName fontWeight={700}>{`${device.brand} ${device.model}`}</RecordName>,
     device.type,
-    device.serialNumber ?? device.imei ?? "—",
-    device.customer?.fullName ?? "—",
+    device.serialNumber || device.imei || "—",
+    <RecordName fontWeight={400}>{device.customer?.fullName ?? "—"}</RecordName>,
     device.reportedFault,
-    <Tooltip title="Deactivate device"><IconButton color="error" onClick={() => setRemoving(device)}><DeleteOutline /></IconButton></Tooltip>,
+    ...(admin ? [<Tooltip title="Deactivate device"><IconButton aria-label={`Deactivate ${device.brand} ${device.model}`} color="error" onClick={() => { deletion.reset(); setDeleteReason(""); setRemoving(device); }}><DeleteOutline /></IconButton></Tooltip>] : []),
   ]);
   return (
     <>
@@ -247,9 +282,11 @@ export function DevicesPage() {
         title="Devices"
         description="Serialized equipment records linked to verified customer profiles."
         actions={
-          <CreateButton label="Register device" onClick={() => setOpen(true)} />
+          admin ? <CreateButton label="Register device" onClick={() => { create.reset(); setOpen(true); }} /> : undefined
         }
       />
+      <DirectorySearch key={search} value={search} label="Find a device" placeholder="Brand, model, serial number or IMEI" onSearch={(value) => setParams(value ? { q: value } : {})} />
+      <ResultStatus count={devices.data?.length ?? 0} busy={devices.isFetching} limit={100} />
       <DataTable
         columns={[
           "Device",
@@ -257,18 +294,26 @@ export function DevicesPage() {
           "Serial / IMEI",
           "Customer",
           "Reported fault",
-          "Action",
+          ...(admin ? ["Action"] : []),
         ]}
         rows={rows}
+        rowKeys={(devices.data ?? []).map((device) => device.id)}
+        caption="Devices and their customer-reported faults"
+        minTableWidth={1000}
+        mobileSummaryColumns={[0, 1]}
+        empty={search ? "No devices match this search. Try a brand, model, serial number or IMEI." : "No devices have been registered in this business yet."}
       />
       <FormDialog
         open={open}
         title="Register device"
+        description="Link the device to a customer, record its identity and describe the reported fault."
+        dirty={JSON.stringify(form) !== JSON.stringify(emptyDevice)}
         busy={create.isPending}
         error={create.error ? apiMessage(create.error) : undefined}
         onClose={() => setOpen(false)}
         onSubmit={() => create.mutate()}
       >
+        <Typography component="h2" variant="subtitle2">Customer and device identity</Typography>
         <TextField
           select
           required
@@ -382,6 +427,7 @@ export function DevicesPage() {
             setForm({ ...form, accessories: event.target.value })
           }
         />
+        <Typography component="h2" variant="subtitle2">Intake condition</Typography>
         <TextField
           multiline
           minRows={2}
@@ -418,10 +464,14 @@ export function DevicesPage() {
 const emptyTechnician = { fullName: "", email: "", phone: "" };
 export function TechniciansPage() {
   const { user } = useAuth();
+  const [params, setParams] = useSearchParams();
+  const search = params.get("q") ?? "";
+  const statusFilter = params.get("status") ?? "";
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(emptyTechnician);
   const [notice, setNotice] = useState("");
+  const [disabling, setDisabling] = useState<Technician | null>(null);
   const query = useQuery({
     queryKey: ["technicians"],
     queryFn: async () =>
@@ -448,7 +498,7 @@ export function TechniciansPage() {
   const status = useMutation({
     mutationFn: ({ id, value }: { id: string; value: string }) =>
       api.patch(`/businesses/technicians/${id}/status`, { status: value }),
-    onSuccess: refresh,
+    onSuccess: async () => { setDisabling(null); setNotice("The account status was updated."); await refresh(); },
   });
   const reset = useMutation({
     mutationFn: (id: string) =>
@@ -459,9 +509,10 @@ export function TechniciansPage() {
   const currentAdmin = query.data?.find((person) => person.id === user?.id);
   const capability = useMutation({ mutationFn: (enabled: boolean) => api.put("/businesses/me/technician-capability", { enabled }), onSuccess: refresh });
   if (query.isLoading) return <LoadingBlock />;
-  if (query.error) return <ErrorBlock message={apiMessage(query.error)} />;
-  const rows = (query.data ?? []).map((person) => [
-    <Typography fontWeight={700}>{person.fullName}</Typography>,
+  if (query.error) return <ErrorBlock message={apiMessage(query.error)} retry={() => void query.refetch()} />;
+  const people = (query.data ?? []).filter((person) => `${person.fullName} ${person.email} ${person.phone ?? ""}`.toLowerCase().includes(search.toLowerCase()) && (!statusFilter || person.status === statusFilter));
+  const rows = people.map((person) => [
+    <RecordName fontWeight={700}>{person.fullName}</RecordName>,
     <Stack>
       <span>{person.email}</span>
       <Typography variant="caption" color="text.secondary">
@@ -471,9 +522,9 @@ export function TechniciansPage() {
     <StatusChip status={person.status} />,
     person._count?.assignedRepairs ?? 0,
     readableDate(person.lastLoginAt),
-    <Stack direction="row">
+    person.role?.code === "BUSINESS_ADMIN" ? <Typography variant="caption" color="text.secondary">Administrator account</Typography> : <Stack direction="row">
       <Tooltip title="Send password reset">
-        <IconButton onClick={() => reset.mutate(person.id)}>
+        <IconButton aria-label={`Send password reset to ${person.fullName}`} onClick={() => reset.mutate(person.id)} disabled={reset.isPending || status.isPending}>
           <Key />
         </IconButton>
       </Tooltip>
@@ -483,13 +534,10 @@ export function TechniciansPage() {
         }
       >
         <IconButton
+          aria-label={`${person.status === "DISABLED" ? "Enable" : "Disable"} ${person.fullName} account`}
+          disabled={status.isPending || reset.isPending}
           color={person.status === "DISABLED" ? "success" : "warning"}
-          onClick={() =>
-            status.mutate({
-              id: person.id,
-              value: person.status === "DISABLED" ? "ACTIVE" : "DISABLED",
-            })
-          }
+          onClick={() => { status.reset(); if (person.status === "DISABLED") status.mutate({ id: person.id, value: "ACTIVE" }); else setDisabling(person); }}
         >
           {person.status === "DISABLED" ? <CheckCircle /> : <Block />}
         </IconButton>
@@ -513,7 +561,12 @@ export function TechniciansPage() {
           {notice}
         </Alert>
       )}
+      {(status.error || reset.error || capability.error) && <Alert severity="error" sx={{ mb: 2 }}>{apiMessage(status.error ?? reset.error ?? capability.error)}</Alert>}
       <Alert severity="info" sx={{ mb: 2 }} action={<Button onClick={() => capability.mutate(!currentAdmin?.canTakeRepairJobs)} disabled={capability.isPending}>{currentAdmin?.canTakeRepairJobs ? "Disable for me" : "Enable for me"}</Button>}>Business administrators can optionally appear in technician assignment lists and accept repair work without receiving technician-only permissions.</Alert>
+      <DirectorySearch key={search} value={search} label="Find a team member" placeholder="Name, email or phone" onSearch={(value) => { const next = new URLSearchParams(params); if (value) next.set("q", value); else next.delete("q"); setParams(next); }}>
+        <TextField select size="small" label="Account status" value={statusFilter} onChange={(event) => { const next = new URLSearchParams(params); if (event.target.value) next.set("status", event.target.value); else next.delete("status"); setParams(next); }} sx={{ minWidth: { md: 180 } }}><MenuItem value="">All statuses</MenuItem>{["ACTIVE", "PENDING_VERIFICATION", "DISABLED", "LOCKED", "DELETION_REQUESTED", "DELETED"].map((value) => <MenuItem key={value} value={value}>{value[0] + value.slice(1).toLowerCase().replaceAll("_", " ")}</MenuItem>)}</TextField>
+      </DirectorySearch>
+      <ResultStatus count={people.length} busy={query.isFetching} />
       <DataTable
         columns={[
           "Technician",
@@ -524,10 +577,17 @@ export function TechniciansPage() {
           "Actions",
         ]}
         rows={rows}
+        rowKeys={people.map((person) => person.id)}
+        caption="Team accounts and assigned repair workload"
+        minTableWidth={1000}
+        mobileSummaryColumns={[0, 2]}
+        empty={search || statusFilter ? "No team members match these filters. Clear the search or choose All statuses." : "No technicians have been invited yet."}
       />
       <FormDialog
         open={open}
         title="Invite technician"
+        description="A secure activation invitation will be queued for the email address below."
+        dirty={JSON.stringify(form) !== JSON.stringify(emptyTechnician)}
         busy={create.isPending}
         error={create.error ? apiMessage(create.error) : undefined}
         onClose={() => setOpen(false)}
@@ -554,6 +614,7 @@ export function TechniciansPage() {
           onChange={(event) => setForm({ ...form, phone: event.target.value })}
         />
       </FormDialog>
+      <FormDialog open={Boolean(disabling)} title="Disable technician account" description={`Disable access for ${disabling?.fullName ?? "this technician"}? Existing repair and audit records are preserved, and active sessions will be signed out.`} busy={status.isPending} error={status.error ? apiMessage(status.error) : undefined} onClose={() => setDisabling(null)} onSubmit={() => { if (disabling) status.mutate({ id: disabling.id, value: "DISABLED" }); }} submitLabel="Disable account"><Alert severity="warning">This prevents the technician from signing in until an administrator enables the account again.</Alert></FormDialog>
     </>
   );
 }
@@ -569,6 +630,11 @@ const emptyStock = {
   location: "",
 };
 export function InventoryPage() {
+  const { user } = useAuth();
+  const admin = user?.role === "BUSINESS_ADMIN";
+  const [params, setParams] = useSearchParams();
+  const search = params.get("q") ?? "";
+  const lowStock = params.get("lowStock") === "1";
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [adjusting, setAdjusting] = useState<InventoryItem | null>(null);
@@ -576,9 +642,9 @@ export function InventoryPage() {
   const [notes, setNotes] = useState("");
   const [form, setForm] = useState(emptyStock);
   const query = useQuery({
-    queryKey: ["inventory"],
+    queryKey: ["inventory", { search, lowStock }],
     queryFn: async () =>
-      (await api.get<ApiEnvelope<InventoryItem[]>>("/inventory")).data.data,
+      (await api.get<ApiEnvelope<InventoryItem[]>>("/inventory", { params: { search: search || undefined, lowStock: lowStock || undefined } })).data.data,
   });
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: ["inventory"] });
@@ -613,10 +679,10 @@ export function InventoryPage() {
     },
   });
   if (query.isLoading) return <LoadingBlock />;
-  if (query.error) return <ErrorBlock message={apiMessage(query.error)} />;
+  if (query.error) return <ErrorBlock message={apiMessage(query.error)} retry={() => void query.refetch()} />;
   const rows = (query.data ?? []).map((item) => [
     <Stack>
-      <Typography fontWeight={700}>{item.name}</Typography>
+      <RecordName fontWeight={700}>{item.name}</RecordName>
       <Typography variant="caption" color="text.secondary">
         {item.sku}
       </Typography>
@@ -626,12 +692,14 @@ export function InventoryPage() {
       color={item.quantity <= item.minimumStock ? "warning" : "success"}
       variant="outlined"
       label={`${item.quantity} in stock`}
+      sx={{ color: "text.primary", fontWeight: 650 }}
     />,
     `KES ${Number(item.sellingPrice).toLocaleString()}`,
     item.location ?? "—",
-    <Stack direction="row">
+    ...(admin ? [<Stack direction="row">
       <Tooltip title="Receive stock">
         <IconButton
+          aria-label={`Receive ${item.name} stock`}
           color="success"
           onClick={() => {
             setAdjusting(item);
@@ -643,6 +711,7 @@ export function InventoryPage() {
       </Tooltip>
       <Tooltip title="Reduce stock">
         <IconButton
+          aria-label={`Reduce ${item.name} stock`}
           color="warning"
           onClick={() => {
             setAdjusting(item);
@@ -652,7 +721,7 @@ export function InventoryPage() {
           <Remove />
         </IconButton>
       </Tooltip>
-    </Stack>,
+    </Stack>] : []),
   ]);
   return (
     <>
@@ -660,12 +729,16 @@ export function InventoryPage() {
         title="Inventory"
         description="Live stock levels, pricing, and controlled stock adjustments."
         actions={
-          <CreateButton
+          admin ? <CreateButton
             label="Add inventory item"
-            onClick={() => setOpen(true)}
-          />
+            onClick={() => { create.reset(); setOpen(true); }}
+          /> : undefined
         }
       />
+      <DirectorySearch key={search} value={search} label="Find inventory" placeholder="Part name, SKU or barcode" onSearch={(value) => { const next = new URLSearchParams(params); if (value) next.set("q", value); else next.delete("q"); setParams(next); }}>
+        <Button type="button" variant={lowStock ? "contained" : "outlined"} aria-pressed={lowStock} onClick={() => { const next = new URLSearchParams(params); if (lowStock) next.delete("lowStock"); else next.set("lowStock", "1"); setParams(next); }}>Low stock{lowStock ? " only" : ""}</Button>
+      </DirectorySearch>
+      <ResultStatus count={query.data?.length ?? 0} busy={query.isFetching} />
       <DataTable
         columns={[
           "Item",
@@ -673,18 +746,26 @@ export function InventoryPage() {
           "Quantity",
           "Selling price",
           "Location",
-          "Adjust",
+          ...(admin ? ["Adjust"] : []),
         ]}
         rows={rows}
+        rowKeys={(query.data ?? []).map((item) => item.id)}
+        caption={lowStock ? "Stock at or below the configured threshold" : "Current inventory and configured selling prices"}
+        minTableWidth={960}
+        mobileSummaryColumns={[0]}
+        empty={search || lowStock ? "No inventory items match these filters. Clear the search or turn off Low stock to see more." : "No inventory items have been added yet."}
       />
       <FormDialog
         open={open}
         title="Add inventory item"
+        description="Set the item identity, configured prices and opening stock. Future changes are recorded as stock adjustments."
+        dirty={JSON.stringify(form) !== JSON.stringify(emptyStock)}
         busy={create.isPending}
         error={create.error ? apiMessage(create.error) : undefined}
         onClose={() => setOpen(false)}
         onSubmit={() => create.mutate()}
       >
+        <Typography component="h2" variant="subtitle2">Item identity</Typography>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
           <TextField
             required
@@ -818,17 +899,25 @@ const emptyBusiness = {
   adminPhone: "",
 };
 export function BusinessesPage() {
+  const [params, setParams] = useSearchParams();
+  const search = params.get("q") ?? "";
+  const page = Math.max(1, Math.floor(Number(params.get("page")) || 1));
+  const requestedSize = Number(params.get("pageSize"));
+  const pageSize = [20, 50, 100].includes(requestedSize) ? requestedSize : 20;
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(emptyBusiness);
+  const [changingStatus, setChangingStatus] = useState<{ business: Business; value: string } | null>(null);
   const query = useQuery({
-    queryKey: ["businesses"],
+    queryKey: ["businesses", { search, page, pageSize }],
     queryFn: async () =>
       (
-        await api.get<ApiEnvelope<{ items: Business[]; total: number }>>(
+        await api.get<ApiEnvelope<{ items: Business[]; total: number; page: number; pageSize: number }>>(
           "/businesses",
+          { params: { search: search || undefined, page, pageSize } },
         )
       ).data.data,
+    placeholderData: keepPreviousData,
   });
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: ["businesses"] });
@@ -865,10 +954,10 @@ export function BusinessesPage() {
   const status = useMutation({
     mutationFn: ({ id, value }: { id: string; value: string }) =>
       api.patch(`/businesses/${id}/status`, { status: value }),
-    onSuccess: refresh,
+    onSuccess: async () => { setChangingStatus(null); await refresh(); },
   });
   if (query.isLoading) return <LoadingBlock />;
-  if (query.error) return <ErrorBlock message={apiMessage(query.error)} />;
+  if (query.error) return <ErrorBlock message={apiMessage(query.error)} retry={() => void query.refetch()} />;
   const rows = (query.data?.items ?? []).map((business) => [
     <Stack>
       <Typography fontWeight={700}>{business.name}</Typography>
@@ -888,10 +977,10 @@ export function BusinessesPage() {
       select
       size="small"
       aria-label={`Change ${business.name} status`}
+      slotProps={{ select: { "aria-label": `Change ${business.name} status` } }}
       value={business.status}
-      onChange={(event) =>
-        status.mutate({ id: business.id, value: event.target.value })
-      }
+      disabled={query.isFetching || status.isPending}
+      onChange={(event) => { status.reset(); setChangingStatus({ business, value: event.target.value }); }}
     >
       {["ACTIVE", "SUSPENDED", "INACTIVE", "DELETED"].map((value) => (
         <MenuItem key={value} value={value}>
@@ -912,6 +1001,8 @@ export function BusinessesPage() {
           />
         }
       />
+      <DirectorySearch key={search} value={search} label="Find a business" placeholder="Business name or email" onSearch={(value) => { const next = new URLSearchParams(params); if (value) next.set("q", value); else next.delete("q"); next.delete("page"); setParams(next); }} />
+      <ResultStatus count={query.data?.items.length ?? 0} busy={query.isFetching} />
       <DataTable
         columns={[
           "Business",
@@ -923,10 +1014,19 @@ export function BusinessesPage() {
           "Control",
         ]}
         rows={rows}
+        rowKeys={(query.data?.items ?? []).map((business) => business.id)}
+        mobileSummaryColumns={[0, 2]}
+        paginated={false}
+        caption={`Business workspaces · Page ${query.data?.page ?? page} · ${query.data?.total ?? 0} matching workspaces`}
+        empty={search ? "No businesses match this search. Try another name or email." : "No business workspaces are registered yet."}
       />
+      {Boolean(query.data?.total) && <TablePagination component="div" count={query.data?.total ?? 0} page={Math.max(0, (query.data?.page ?? page) - 1)} rowsPerPage={query.data?.pageSize ?? pageSize} rowsPerPageOptions={[20, 50, 100]} onPageChange={(_, nextPage) => { const next = new URLSearchParams(params); next.set("page", String(nextPage + 1)); setParams(next); }} onRowsPerPageChange={(event) => { const next = new URLSearchParams(params); next.set("pageSize", event.target.value); next.delete("page"); setParams(next); }} disabled={query.isFetching} labelRowsPerPage="Workspaces" sx={{ mt: 1, ".MuiTablePagination-toolbar": { flexWrap: "wrap", px: 0 }, ".MuiTablePagination-spacer": { display: "none" } }} />}
+      <FormDialog open={Boolean(changingStatus)} title="Change business status" description={`${changingStatus?.business.name ?? "This business"} will become ${changingStatus?.value.toLowerCase() ?? "updated"}.`} busy={status.isPending} error={status.error ? apiMessage(status.error) : undefined} onClose={() => setChangingStatus(null)} onSubmit={() => { if (changingStatus) status.mutate({ id: changingStatus.business.id, value: changingStatus.value }); }} submitLabel="Confirm status change"><Alert severity={changingStatus?.value === "ACTIVE" ? "info" : "warning"}>{changingStatus?.value === "DELETED" ? "This removes the workspace from active management and signs out its users. Linked records are retained, but this screen does not provide a restore action." : changingStatus?.value === "ACTIVE" ? "This enables the workspace under its existing subscription and account rules." : "This restricts workspace access and signs out active users. Existing records remain intact."}</Alert></FormDialog>
       <FormDialog
         open={open}
         title="Onboard repair business"
+        description="Create the tenant workspace and queue an invitation for its primary administrator."
+        dirty={JSON.stringify(form) !== JSON.stringify(emptyBusiness)}
         busy={create.isPending}
         error={create.error ? apiMessage(create.error) : undefined}
         onClose={() => setOpen(false)}

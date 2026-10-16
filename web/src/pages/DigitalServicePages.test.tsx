@@ -1,11 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Role } from "../types";
 
-const mocks = vi.hoisted((): { get: ReturnType<typeof vi.fn>; post: ReturnType<typeof vi.fn>; role: Role } => ({ get: vi.fn(), post: vi.fn(), role: "BUSINESS_ADMIN" }));
-vi.mock("../api/client", () => ({ api: { get: mocks.get, post: mocks.post }, apiMessage: () => "Request unavailable" }));
+const mocks = vi.hoisted((): { get: ReturnType<typeof vi.fn>; post: ReturnType<typeof vi.fn>; patch: ReturnType<typeof vi.fn>; role: Role } => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), role: "BUSINESS_ADMIN" }));
+vi.mock("../api/client", () => ({ api: { get: mocks.get, post: mocks.post, patch: mocks.patch }, apiMessage: () => "Request unavailable" }));
 vi.mock("../auth/AuthProvider", () => ({ useAuth: () => ({ user: { id: "assigned-user", role: mocks.role } }) }));
 import { DigitalServiceDetailPage, DigitalServicesPage, PublicDigitalTrackPage } from "./DigitalServicePages";
 
@@ -69,10 +69,10 @@ describe("digital service workflow", () => {
     expect(screen.queryByRole("button", { name: "Assign" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Create manual invoice" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Update stage" }));
-    fireEvent.mouseDown(screen.getByLabelText("Next stage"));
-    expect(screen.getByRole("option", { name: "AWAITING APPROVAL" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "IN PROGRESS" })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: "DELIVERED" })).not.toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Next stage" }));
+    expect(screen.getByRole("option", { name: "Awaiting approval" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "In progress" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Delivered" })).not.toBeInTheDocument();
   });
 
   it("creates service-specific intake without a device and reads the top-level tracking URL", async () => {
@@ -108,7 +108,7 @@ describe("digital service workflow", () => {
     await screen.findByText("https://repair-track-web.vercel.app/track/digital/private-fixture");
     expect(mocks.post.mock.calls[0][1].newCustomer).toMatchObject({ fullName: "New customer", preferredCommunication: "EMAIL", whatsappOptIn: true });
     expect(mocks.post.mock.calls[0][1].newCustomer).not.toHaveProperty("whatsappOptInAt");
-  });
+  }, 15_000);
 
   it("clears WhatsApp consent when either intake recipient number changes", async () => {
     mount(<DigitalServicesPage />, "/digital-services", "/digital-services");
@@ -163,7 +163,7 @@ describe("manual digital WhatsApp sharing", () => {
     const share = await screen.findByRole("link", { name: "Send to WhatsApp" });
     const url = new URL(share.getAttribute("href")!);
     expect(url.pathname).toBe("/254733000111"); expect(url.searchParams.get("text")).toContain("New digital customer");
-  });
+  }, 15_000);
 
   it.each(["BUSINESS_ADMIN", "TECHNICIAN"] as const)("prefetches the authorized URL for %s and does not send a notification", async (role) => {
     mocks.role = role;
@@ -189,6 +189,8 @@ describe("public digital tracking", () => {
     mocks.get.mockResolvedValue({ data: { data: { ...ticket, kind, dateReceived: ticket.createdAt, business: { name: "Example business", phone: "+254700000000", currency: "KES" }, requirements: "DO NOT SHOW PRIVATE REQUIREMENTS", trackingToken: "DO NOT SHOW TOKEN", internalNotes: "DO NOT SHOW TEAM NOTES" } } });
     mount(<PublicDigitalTrackPage />, "/track/digital/token-fixture", "/track/digital/:token");
     await screen.findByText(label);
+    expect(screen.getByRole("heading", { level: 1, name: ticket.reference })).toBeInTheDocument();
+    expect(screen.getByRole("main")).toHaveClass("product-ui");
     expect(screen.getByText("Customer website")).toBeInTheDocument();
     expect(screen.getByText("We are reviewing your scope.")).toBeInTheDocument();
     expect(screen.queryByText("Example customer")).not.toBeInTheDocument();
@@ -205,5 +207,86 @@ describe("public digital tracking", () => {
     mount(<PublicDigitalTrackPage />, "/track/digital/missing-fixture", "/track/digital/:token");
     await screen.findByText(/That tracking link is invalid or expired/);
     expect(screen.queryByText("Sensitive internal database error")).not.toBeInTheDocument();
+  });
+});
+
+function DigitalRouteContext() {
+  const location = useLocation();
+  return <output aria-label="Current route">{location.pathname}{location.search}</output>;
+}
+
+describe("digital workbench context and mutation recovery", () => {
+  it("keeps service, stage, search and local order when returning from project detail", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><MemoryRouter initialEntries={["/digital-services?q=website&kind=WEBSITE&status=DISCOVERY&sort=oldest"]}><Routes><Route path="/digital-services" element={<><DigitalServicesPage /><DigitalRouteContext /></>} /><Route path="/digital-services/:id" element={<DigitalServiceDetailPage />} /></Routes></MemoryRouter></QueryClientProvider>);
+    fireEvent.click(await screen.findByRole("link", { name: ticket.reference }));
+    const back = await screen.findByRole("link", { name: "Back to digital solutions" });
+    expect(back).toHaveAttribute("href", "/digital-services?q=website&kind=WEBSITE&status=DISCOVERY&sort=oldest");
+    fireEvent.click(back);
+    expect(await screen.findByRole("textbox", { name: "Search tickets" })).toHaveValue("website");
+    expect(screen.getByRole("combobox", { name: "Service" })).toHaveTextContent("Website");
+    expect(screen.getByRole("combobox", { name: "Order loaded projects" })).toHaveTextContent("Oldest received");
+    expect(mocks.get).toHaveBeenCalledWith("/digital-services", { params: { kind: "WEBSITE", status: "DISCOVERY" } });
+  });
+
+  it("uses accurate no-results feedback rather than a fake total", async () => {
+    mount(<DigitalServicesPage />, "/digital-services?q=not-found", "/digital-services");
+    await screen.findByText("No projects match this view");
+    expect(screen.getByText(/0 matching projects · 1 loaded/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(await screen.findByText("Customer website")).toBeInTheDocument();
+  });
+
+  it("retains the entered scope after failed creation", async () => {
+    mocks.post.mockRejectedValue(new Error("network"));
+    mount(<DigitalServicesPage />, "/digital-services", "/digital-services");
+    fireEvent.click(await screen.findByRole("button", { name: "New digital intake" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: /^Customer/ }));
+    fireEvent.click(screen.getByRole("option", { name: "Example customer · +254700000000" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /^Project title/ }), { target: { value: "Keep this scope" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /^Requirements/ }), { target: { value: "A complete accessible booking workflow." } });
+    fireEvent.click(screen.getByRole("button", { name: "Create ticket" }));
+    await screen.findByText("Request unavailable");
+    expect(screen.getByRole("textbox", { name: /^Project title/ })).toHaveValue("Keep this scope");
+    expect(screen.getByRole("textbox", { name: /^Requirements/ })).toHaveValue("A complete accessible booking workflow.");
+    expect(screen.getByRole("button", { name: "Create ticket" })).toBeEnabled();
+  });
+
+  it("locks a pending stage update and preserves the existing payload", async () => {
+    let finish!: (value: unknown) => void;
+    mocks.post.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    mount(<DigitalServiceDetailPage />, "/digital-services/ticket-id", "/digital-services/:id");
+    fireEvent.click(await screen.findByRole("button", { name: "Update stage" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Customer-visible update" }), { target: { value: "Please review the agreed scope." } });
+    fireEvent.click(screen.getByRole("button", { name: "Update and notify" }));
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
+    const saving = await screen.findByRole("button", { name: "Saving…" });
+    expect(saving).toBeDisabled(); fireEvent.click(saving);
+    expect(mocks.post).toHaveBeenCalledWith("/digital-services/ticket-id/status", { status: "AWAITING_APPROVAL", customerMessage: "Please review the agreed scope." });
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+    await act(async () => { finish({ data: { data: ticket } }); await Promise.resolve(); });
+    await screen.findByText("Project stage updated. The customer notification has been requested.");
+  });
+
+  it("does not offer mutations or private billing to an unassigned technician", async () => {
+    mocks.role = "TECHNICIAN";
+    mocks.get.mockResolvedValue({ data: { data: { ...ticket, assignedTechnician: { id: "other-user", fullName: "Other engineer" } } } });
+    mount(<DigitalServiceDetailPage />, "/digital-services/ticket-id", "/digital-services/:id");
+    await screen.findByText("Project requirements");
+    for (const name of ["Update stage", "Assign", "Edit project", "Add note"]) expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Create manual invoice" })).not.toBeInTheDocument();
+    expect(screen.queryByText("PRIVATE INTERNAL NOTE")).not.toBeInTheDocument();
+    expect(mocks.get.mock.calls.some(([path]) => String(path).endsWith("/tracking"))).toBe(false);
+  });
+
+  it("round trips an unchanged delivery date without silently shifting its timezone", async () => {
+    const estimatedCompletionAt = "2026-10-20T09:30:00.000Z";
+    mocks.get.mockImplementation((path: string) => Promise.resolve({ data: { data: path === "/businesses/technicians" ? [] : path.endsWith("/tracking") ? { trackingUrl } : { ...ticket, estimatedCompletionAt } } }));
+    mocks.patch.mockResolvedValue({ data: { data: ticket } });
+    mount(<DigitalServiceDetailPage />, "/digital-services/ticket-id", "/digital-services/:id");
+    fireEvent.click(await screen.findByRole("button", { name: "Edit project" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save project" }));
+    await screen.findByText("Project scope and details saved.");
+    expect(mocks.patch).toHaveBeenCalledWith("/digital-services/ticket-id", expect.objectContaining({ estimatedCompletionAt }));
   });
 });

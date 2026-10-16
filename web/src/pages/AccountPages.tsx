@@ -18,12 +18,14 @@ import {
   Paper,
   Stack,
   Switch,
+  Tab,
+  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, apiMessage } from "../api/client";
 import { useAuth } from "../auth/AuthProvider";
 import { BrandLogo } from "../components/BrandLogo";
@@ -69,14 +71,15 @@ export function NotificationsPage() {
     },
   });
   if (query.isLoading) return <LoadingBlock />;
-  if (query.error) return <ErrorBlock message={apiMessage(query.error)} />;
+  if (query.error) return <ErrorBlock message={apiMessage(query.error)} retry={() => void query.refetch()} />;
   return (
     <>
       <PageHeader
         title="Notifications"
         description="Repair updates and account events delivered to this user."
-        actions={<Button startIcon={<MarkEmailRead />} onClick={() => readAll.mutate()} disabled={readAll.isPending}>Mark all read</Button>}
+        actions={<Button startIcon={<MarkEmailRead />} onClick={() => readAll.mutate()} disabled={readAll.isPending || read.isPending || !query.data?.some((item) => !item.readAt)}>Mark all read</Button>}
       />
+      {(read.error || readAll.error) && <Alert severity="error" sx={{ mb: 2 }}>{apiMessage(read.error ?? readAll.error)} The read status could not be confirmed. Try again.</Alert>}
       <Paper sx={{ p: 2, mb: 2 }}>
         <Stack direction={{ xs: "column", sm: "row" }} gap={2}>
           <TextField select label="Category" value={category} onChange={(event) => setCategory(event.target.value)} sx={{ minWidth: 220 }}>
@@ -92,7 +95,7 @@ export function NotificationsPage() {
             <Paper
               variant="outlined"
               key={item.id}
-              sx={{ p: 2.5, opacity: item.readAt ? 0.68 : 1 }}
+              sx={{ p: 2.5, borderLeft: 3, borderLeftColor: item.readAt ? "divider" : "primary.dark" }}
             >
               <Stack
                 direction={{ xs: "column", sm: "row" }}
@@ -100,7 +103,7 @@ export function NotificationsPage() {
                 alignItems={{ sm: "center" }}
               >
                 <Box flex={1}>
-                  <Stack direction="row" gap={1} alignItems="center">
+                  <Stack direction="row" gap={1} alignItems="center" flexWrap="wrap">
                     <Typography fontWeight={800}>{item.title}</Typography>
                     {item.category && <Chip size="small" label={item.category.replaceAll("_", " ")} variant="outlined" />}
                     {!item.readAt && (
@@ -119,6 +122,7 @@ export function NotificationsPage() {
                   <Button
                     startIcon={<MarkEmailRead />}
                     onClick={() => read.mutate(item.id)}
+                    disabled={read.isPending || readAll.isPending}
                   >
                     Mark read
                   </Button>
@@ -138,14 +142,16 @@ export function NotificationsPage() {
 }
 
 export function AuditPage() {
+  const [search, setSearch] = useState("");
   const query = useQuery({
     queryKey: ["audit"],
     queryFn: async () =>
       (await api.get<ApiEnvelope<AuditLog[]>>("/businesses/audit")).data.data,
   });
   if (query.isLoading) return <LoadingBlock />;
-  if (query.error) return <ErrorBlock message={apiMessage(query.error)} />;
-  const rows = (query.data ?? []).map((log) => [
+  if (query.error) return <ErrorBlock message={apiMessage(query.error)} retry={() => void query.refetch()} />;
+  const visibleLogs = (query.data ?? []).filter((log) => `${log.user?.fullName ?? "System"} ${log.user?.email ?? ""} ${log.action} ${log.resourceType} ${log.resourceId ?? ""}`.toLowerCase().includes(search.toLowerCase()));
+  const rows = visibleLogs.map((log) => [
     new Date(log.createdAt).toLocaleString(),
     <Stack>
       <Typography fontWeight={700}>{log.user?.fullName ?? "System"}</Typography>
@@ -162,7 +168,11 @@ export function AuditPage() {
         title="Audit trail"
         description="Append-only security and operational events for accountability."
       />
+      <Paper sx={{ p: 2.5, mb: 3 }}><TextField fullWidth size="small" label="Search loaded audit events" value={search} onChange={(event) => setSearch(event.target.value)} helperText="Search actors, actions and resources within the latest 200 events." /></Paper>
       <DataTable
+        caption={`${visibleLogs.length} shown · latest ${query.data?.length ?? 0} loaded security events (maximum 200)`}
+        rowKeys={visibleLogs.map((log) => log.id)}
+        empty={search ? "No loaded audit events match this search." : "No security events recorded yet."}
         columns={[
           "Time",
           "Actor",
@@ -206,6 +216,11 @@ interface DeliveryItem { id: string; channel: string; status: string; subject?: 
 export function SettingsPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  const sections = user?.role === "BUSINESS_ADMIN" ? ["business", "tax", "delivery", "advanced"] : ["advanced"];
+  const section = sections.includes(params.get("section") ?? "") ? params.get("section")! : sections[0];
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [taxOpen, setTaxOpen] = useState(false);
   const [key, setKey] = useState("notifications.email.enabled");
   const [value, setValue] = useState("true");
   const [profile, setProfile] = useState<BusinessProfile | null>(null);
@@ -228,9 +243,9 @@ export function SettingsPage() {
   const deliveries = useQuery({ queryKey: ["notification-delivery"], queryFn: async () => (await api.get<ApiEnvelope<DeliveryItem[]>>("/notifications/delivery")).data.data, enabled: user?.role === "BUSINESS_ADMIN" });
   const retryDelivery = useMutation({ mutationFn: (id: string) => api.post(`/notifications/delivery/${id}/retry`), onSuccess: async () => { setNotice("Delivery retry processed; check the status below."); await queryClient.invalidateQueries({ queryKey: ["notification-delivery"] }); } });
   useEffect(() => {
-    if (business.data) setProfile(business.data);
-  }, [business.data]);
-  useEffect(() => { if (taxQuery.data) setTax(taxQuery.data); }, [taxQuery.data]);
+    if (business.data && !profileOpen) setProfile(business.data);
+  }, [business.data, profileOpen]);
+  useEffect(() => { if (taxQuery.data && !taxOpen) setTax(taxQuery.data); }, [taxQuery.data, taxOpen]);
   const saveSetting = useMutation({
     mutationFn: () => {
       let parsed: unknown;
@@ -264,9 +279,10 @@ export function SettingsPage() {
     onSuccess: async () => {
       setNotice("Business profile updated.");
       await queryClient.invalidateQueries({ queryKey: ["business-profile"] });
+      setProfileOpen(false);
     },
   });
-  const saveTax = useMutation({ mutationFn: () => api.put("/settings/tax", tax), onSuccess: async () => { setNotice("Tax and eTIMS settings updated."); await queryClient.invalidateQueries({ queryKey: ["tax-settings"] }); } });
+  const saveTax = useMutation({ mutationFn: () => api.put("/settings/tax", tax), onSuccess: async () => { setNotice("Tax and eTIMS settings updated."); await queryClient.invalidateQueries({ queryKey: ["tax-settings"] }); setTaxOpen(false); } });
   const uploadLogo = useMutation({
     mutationFn: async (file: File) => {
       if (file.size > 2 * 1024 * 1024) throw new Error("Choose an image no larger than 2 MB.");
@@ -278,18 +294,24 @@ export function SettingsPage() {
       });
       return api.put("/businesses/profile/logo", { imageDataUrl });
     },
-    onSuccess: async () => { setNotice("Logo uploaded. It will appear on invoices, receipts and customer emails."); await queryClient.invalidateQueries({ queryKey: ["business-profile"] }); },
+    onSuccess: async () => { setNotice("Logo uploaded. It will appear on invoices, receipts and customer emails."); await queryClient.invalidateQueries({ queryKey: ["business-profile"] }); const updated = queryClient.getQueryData<BusinessProfile>(["business-profile"]); setProfile((current) => current ? { ...current, logoImageUrl: updated?.logoImageUrl } : current); },
   });
-  const removeLogo = useMutation({ mutationFn: () => api.delete("/businesses/profile/logo"), onSuccess: async () => { setNotice("Business logo removed."); await queryClient.invalidateQueries({ queryKey: ["business-profile"] }); } });
+  const removeLogo = useMutation({ mutationFn: () => api.delete("/businesses/profile/logo"), onSuccess: async () => { setNotice("Business logo removed."); await queryClient.invalidateQueries({ queryKey: ["business-profile"] }); setProfile((current) => current ? { ...current, logoImageUrl: undefined } : current); } });
   if (settings.isLoading || business.isLoading || taxQuery.isLoading || integrations.isLoading) return <LoadingBlock />;
   const issue = settings.error ?? business.error ?? taxQuery.error ?? integrations.error;
-  if (issue) return <ErrorBlock message={apiMessage(issue)} />;
+  if (issue) return <ErrorBlock message={apiMessage(issue)} retry={() => { void settings.refetch(); void integrations.refetch(); if (user?.role === "BUSINESS_ADMIN") { void business.refetch(); void taxQuery.refetch(); } }} />;
   return (
     <>
       <PageHeader
         title="Settings"
         description="Business identity, document defaults, and scoped configuration."
       />
+      <Tabs value={section} onChange={(_, selected: string) => setParams({ section: selected }, { replace: true })} variant="scrollable" allowScrollButtonsMobile aria-label="Settings sections" sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}>
+        {user?.role === "BUSINESS_ADMIN" && <Tab id="settings-business-tab" label="Identity & documents" value="business" aria-controls="settings-business" />}
+        {user?.role === "BUSINESS_ADMIN" && <Tab id="settings-tax-tab" label="Tax controls" value="tax" aria-controls="settings-tax" />}
+        {user?.role === "BUSINESS_ADMIN" && <Tab id="settings-delivery-tab" label="Message delivery" value="delivery" aria-controls="settings-delivery" />}
+        <Tab id="settings-advanced-tab" label="Advanced" value="advanced" aria-controls="settings-advanced" />
+      </Tabs>
       {notice && (
         <Alert severity="success" onClose={() => setNotice("")} sx={{ mb: 2 }}>
           {notice}
@@ -298,13 +320,20 @@ export function SettingsPage() {
       {(saveProfile.error || saveTax.error || saveSetting.error || uploadLogo.error || removeLogo.error || retryDelivery.error) && <Alert severity="error" sx={{ mb: 2 }}>{apiMessage(saveProfile.error ?? saveTax.error ?? saveSetting.error ?? uploadLogo.error ?? removeLogo.error ?? retryDelivery.error)}</Alert>}
       <Grid container spacing={3}>
         {profile && (
-          <Grid size={{ xs: 12, lg: 7 }}>
+          <Grid size={12} role="tabpanel" id="settings-business" aria-labelledby="settings-business-tab" hidden={section !== "business"}>
             <Card>
               <CardContent>
                 <Typography variant="h6">Business profile</Typography>
                 <Typography variant="body2" color="text.secondary" mb={3}>
                   Displayed on invoices, receipts, and customer notifications.
                 </Typography>
+                <Stack spacing={2.5} maxWidth={780}>
+                  {business.data?.logoImageUrl && <Box component="img" src={business.data.logoImageUrl} alt={`${business.data.name} logo`} sx={{ width: 180, height: 130, objectFit: "contain" }} />}
+                  <Typography variant="h5">{business.data?.name}</Typography>
+                  <Grid container spacing={3}><Grid size={{ xs: 12, sm: 6 }}><KeyValue label="Contact" value={<>{business.data?.email}<br />{business.data?.phone}</>} /></Grid><Grid size={{ xs: 12, sm: 6 }}><KeyValue label="Workshop address" value={<>{business.data?.address}<br />{business.data?.city}, {business.data?.country}</>} /></Grid><Grid size={{ xs: 12, sm: 6 }}><KeyValue label="Document currency" value={business.data?.currency} /></Grid><Grid size={{ xs: 12, sm: 6 }}><KeyValue label="Default repair labour" value={`${business.data?.currency ?? "KES"} ${Number(business.data?.defaultLabourCharge ?? 0).toLocaleString()}`} /></Grid></Grid>
+                  <Box><Button variant="contained" startIcon={<Edit />} onClick={() => { saveProfile.reset(); setProfile(business.data ?? null); setProfileOpen(true); }}>Edit business profile</Button></Box>
+                </Stack>
+                <FormDialog open={profileOpen} title="Edit business profile" description="Saved identity and document defaults apply to invoices, receipts and customer notifications. Logo upload/removal is saved immediately and separately." maxWidth="md" busy={saveProfile.isPending || uploadLogo.isPending || removeLogo.isPending} error={saveProfile.error || uploadLogo.error || removeLogo.error ? apiMessage(saveProfile.error ?? uploadLogo.error ?? removeLogo.error) : undefined} dirty={JSON.stringify(profile) !== JSON.stringify(business.data)} onClose={() => setProfileOpen(false)} onSubmit={() => saveProfile.mutate()} submitLabel="Save profile">
                 <Stack spacing={2}>
                   <TextField
                     label="Business name"
@@ -432,27 +461,36 @@ export function SettingsPage() {
                       })
                     }
                   />
-                  <Button
-                    variant="contained"
-                    onClick={() => saveProfile.mutate()}
-                    disabled={saveProfile.isPending}
-                  >
-                    Save profile
-                  </Button>
                 </Stack>
+                </FormDialog>
               </CardContent>
             </Card>
           </Grid>
         )}
-        {tax && <Grid size={{ xs: 12, lg: 5 }}><Card><CardContent><Typography variant="h6">KRA / eTIMS controls</Typography><Typography variant="body2" color="text.secondary" mb={2}>Off by default. KRA information and submission controls are hidden on invoices and receipts until enabled after setup. This does not change tax calculations or existing records.</Typography><Stack spacing={2}><Alert severity={integrations.data?.kraEtims ? "success" : "info"}>{integrations.data?.kraEtims ? "KRA adapter credentials detected" : "Complete external KRA setup before enabling"}</Alert><FormControlLabel control={<Switch checked={tax.etimsEnabled} onChange={(event) => setTax({ ...tax, etimsEnabled: event.target.checked })} disabled={!tax.etimsEnabled && !integrations.data?.kraEtims} />} label={tax.etimsEnabled ? "KRA features on" : "KRA features off"} /><TextField select label="Environment" value={tax.environment} onChange={(event) => setTax({ ...tax, environment: event.target.value as TaxSetting["environment"] })}><MenuItem value="sandbox">Sandbox</MenuItem><MenuItem value="production">Production</MenuItem></TextField><TextField label="Branch code" value={tax.branchCode ?? ""} onChange={(event) => setTax({ ...tax, branchCode: event.target.value })} /><TextField label="Device identifier" value={tax.deviceIdentifier ?? ""} onChange={(event) => setTax({ ...tax, deviceIdentifier: event.target.value })} /><FormControlLabel control={<Switch checked={tax.requireCustomerKraPin} onChange={(event) => setTax({ ...tax, requireCustomerKraPin: event.target.checked })} />} label="Require customer KRA PIN when KRA is enabled" /><Button variant="contained" onClick={() => saveTax.mutate()} disabled={saveTax.isPending || (tax.etimsEnabled && !integrations.data?.kraEtims)}>Save KRA settings</Button></Stack></CardContent></Card></Grid>}
-        {user?.role === "BUSINESS_ADMIN" && <Grid size={{ xs: 12 }}><Card><CardContent><Typography variant="h6" mb={1}>Customer message delivery</Typography><Typography variant="body2" color="text.secondary" mb={2}>Intake notifications include the ticket number and private tracking link for repairs, websites, software and AI agents. WhatsApp sends only with customer consent and an approved utility template; ongoing updates follow their communication preference.</Typography><Alert severity={integrations.data?.whatsappTicketTemplate ? "success" : "info"} sx={{ mb: 2 }}>{integrations.data?.whatsappTicketTemplate ? "WhatsApp ticket delivery is configured. Sent means accepted by the provider, not confirmed received." : "WhatsApp credentials or the approved ticket template are missing. Messages stay pending; they are never marked sent without provider acknowledgement."}</Alert>{deliveries.isLoading ? <LoadingBlock /> : deliveries.error ? <ErrorBlock message={apiMessage(deliveries.error)} /> : <Stack spacing={1.5}>{deliveries.data?.length ? deliveries.data.map(item => <Paper key={item.id} variant="outlined" sx={{ p: 2 }}><Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" gap={2}><Box><Typography fontWeight={700}>{item.subject ?? "Customer message"}</Typography><Typography variant="body2" color="text.secondary">{item.channel} · {item.status} · {item.repair?.reference ?? item.digitalTicket?.reference ?? "Billing"}</Typography>{item.failureReason && <Typography variant="caption" color="text.secondary">{item.failureReason === "DELIVERY_IN_PROGRESS" ? "Delivery retry in progress" : item.failureReason}</Typography>}</Box>{item.channel === "WHATSAPP" && ["PENDING", "FAILED"].includes(item.status) && <Button onClick={() => retryDelivery.mutate(item.id)} disabled={retryDelivery.isPending || !integrations.data?.whatsappTicketTemplate || item.failureReason === "DELIVERY_IN_PROGRESS"}>Retry WhatsApp</Button>}</Stack></Paper>) : <Typography color="text.secondary">No customer deliveries yet.</Typography>}</Stack>}</CardContent></Card></Grid>}
-        <Grid size={{ xs: 12, lg: profile ? 5 : 12 }}>
+        {tax && <Grid size={12} role="tabpanel" id="settings-tax" aria-labelledby="settings-tax-tab" hidden={section !== "tax"}>
+          <Card><CardContent><Typography variant="h6" component="h2">KRA / eTIMS controls</Typography><Typography variant="body2" color="text.secondary" mt={1} mb={3} maxWidth={760}>Off by default. KRA information and submission controls stay hidden on invoices and receipts until enabled after setup. This does not change tax calculations or existing records.</Typography>
+            <Stack spacing={2.5} maxWidth={600}><KeyValue label="Current state" value={taxQuery.data?.etimsEnabled ? "KRA features on" : "KRA features off"} /><KeyValue label="Environment" value={taxQuery.data?.environment ?? "sandbox"} /><Alert severity={integrations.data?.kraEtims ? "success" : "info"}>{integrations.data?.kraEtims ? "KRA adapter credentials detected" : "Complete external KRA setup before enabling"}</Alert><Box><Button variant="outlined" onClick={() => { saveTax.reset(); setTax(taxQuery.data ?? null); setTaxOpen(true); }}>Configure tax controls</Button></Box></Stack>
+          </CardContent></Card>
+          <FormDialog open={taxOpen} title="Configure KRA / eTIMS" description="Enable only after external setup is complete. This controls document visibility and submission, not the tax calculation rules." busy={saveTax.isPending} error={saveTax.error ? apiMessage(saveTax.error) : undefined} dirty={JSON.stringify(tax) !== JSON.stringify(taxQuery.data)} onClose={() => setTaxOpen(false)} onSubmit={() => saveTax.mutate()} submitLabel="Save KRA settings" submitDisabled={tax.etimsEnabled && !integrations.data?.kraEtims}>
+            <FormControlLabel control={<Switch checked={tax.etimsEnabled} onChange={(event) => setTax({ ...tax, etimsEnabled: event.target.checked })} disabled={!tax.etimsEnabled && !integrations.data?.kraEtims} />} label={tax.etimsEnabled ? "KRA features on" : "KRA features off"} />
+            <TextField select label="Environment" value={tax.environment} onChange={(event) => setTax({ ...tax, environment: event.target.value as TaxSetting["environment"] })}><MenuItem value="sandbox">Sandbox</MenuItem><MenuItem value="production">Production</MenuItem></TextField>
+            <TextField label="Branch code" value={tax.branchCode ?? ""} onChange={(event) => setTax({ ...tax, branchCode: event.target.value })} /><TextField label="Device identifier" value={tax.deviceIdentifier ?? ""} onChange={(event) => setTax({ ...tax, deviceIdentifier: event.target.value })} />
+            <FormControlLabel control={<Switch checked={tax.requireCustomerKraPin} onChange={(event) => setTax({ ...tax, requireCustomerKraPin: event.target.checked })} />} label="Require customer KRA PIN when KRA is enabled" />
+          </FormDialog>
+        </Grid>}
+        {user?.role === "BUSINESS_ADMIN" && <Grid size={12} role="tabpanel" id="settings-delivery" aria-labelledby="settings-delivery-tab" hidden={section !== "delivery"}>
+          <Card><CardContent><Typography variant="h6" component="h2" mb={1}>Customer message delivery</Typography><Typography variant="body2" color="text.secondary" mb={2} maxWidth={800}>Intake notifications include the ticket number and private tracking link for repairs, websites, software and AI agents. WhatsApp sends only with customer consent and an approved utility template; ongoing updates follow their communication preference.</Typography>
+            <Alert severity={integrations.data?.whatsappTicketTemplate ? "success" : "info"} sx={{ mb: 3 }}>{integrations.data?.whatsappTicketTemplate ? "WhatsApp ticket delivery is configured. Sent means accepted by the provider, not confirmed received." : "WhatsApp credentials or the approved ticket template are missing. Messages stay pending; they are never marked sent without provider acknowledgement. Manual Send to WhatsApp buttons remain available on tickets and invoices."}</Alert>
+            {deliveries.isLoading ? <LoadingBlock /> : deliveries.error ? <ErrorBlock message={apiMessage(deliveries.error)} retry={() => void deliveries.refetch()} /> : <Stack divider={<Divider />} spacing={0}>{deliveries.data?.length ? deliveries.data.map(item => <Stack key={item.id} direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", sm: "center" }} gap={2} py={2.5}><Box minWidth={0}><Typography fontWeight={650}>{item.subject ?? "Customer message"}</Typography><Stack direction="row" alignItems="center" gap={1} flexWrap="wrap" mt={0.75}><StatusChip status={item.status} /><Typography variant="body2" color="text.secondary">{item.channel} · {item.repair?.reference ?? item.digitalTicket?.reference ?? "Billing"}</Typography></Stack>{item.failureReason && <Typography variant="caption" color="text.secondary" display="block" mt={1}>{item.failureReason === "DELIVERY_IN_PROGRESS" ? "Delivery retry in progress" : item.failureReason}</Typography>}</Box>{item.channel === "WHATSAPP" && ["PENDING", "FAILED"].includes(item.status) && <Button onClick={() => retryDelivery.mutate(item.id)} disabled={retryDelivery.isPending || !integrations.data?.whatsappTicketTemplate || item.failureReason === "DELIVERY_IN_PROGRESS"}>Retry WhatsApp</Button>}</Stack>) : <EmptyState title="No customer deliveries yet" description="Recorded delivery attempts will appear here. Manual WhatsApp drafts are sent separately by your staff." />}</Stack>}
+          </CardContent></Card>
+        </Grid>}
+        <Grid size={12} role="tabpanel" id="settings-advanced" aria-labelledby="settings-advanced-tab" hidden={section !== "advanced"}>
           <Card>
             <CardContent>
               <Typography variant="h6">Configuration registry</Typography>
               <Typography variant="body2" color="text.secondary" mb={3}>
-                Structured values support future integrations without hard-coded
-                secrets.
+                Administrative configuration values. Do not enter API keys,
+                passwords or other secrets here; provider credentials belong in the server environment.
               </Typography>
               <Stack spacing={2}>
                 <TextField
@@ -696,6 +734,11 @@ interface CustomerFull extends Customer {
   invoices: Invoice[];
 }
 export function CustomerDetailPage() {
+  const location = useLocation();
+  const directoryContext = new URLSearchParams((location.state as { directorySearch?: string } | null)?.directorySearch ?? "");
+  const directoryParams = new URLSearchParams();
+  if (directoryContext.get("q")) directoryParams.set("q", directoryContext.get("q")!);
+  const directoryPath = `/customers${directoryParams.size ? `?${directoryParams.toString()}` : ""}`;
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -763,7 +806,7 @@ export function CustomerDetailPage() {
     <>
       <Button
         component={Link}
-        to="/customers"
+        to={directoryPath}
         startIcon={<ArrowBack />}
         sx={{ mb: 2 }}
       >
@@ -949,13 +992,13 @@ export function PublicTrackPage() {
   });
   if (!params.token)
     return (
-      <Box minHeight="100vh" display="grid" sx={{ placeItems: "center" }} p={2}>
+      <Box className="product-ui" minHeight="100vh" display="grid" sx={{ placeItems: "center" }} p={2}>
         <Card sx={{ width: "100%", maxWidth: 560 }}>
           <CardContent sx={{ p: { xs: 3, sm: 5 } }}>
             <Box mb={3}>
               <BrandLogo className="brand-logo--auth" />
             </Box>
-            <Typography variant="h4">Track your repair</Typography>
+            <Typography component="h1" variant="h4">Track your repair</Typography>
             <Typography color="text.secondary" mt={1} mb={3}>
               Paste the private tracking token from your intake receipt or
               message.
@@ -988,7 +1031,7 @@ export function PublicTrackPage() {
   if (query.isLoading) return <LoadingBlock label="Finding your repair" />;
   if (query.error || !query.data)
     return (
-      <Box minHeight="100vh" display="grid" sx={{ placeItems: "center" }}>
+      <Box className="product-ui" minHeight="100vh" display="grid" sx={{ placeItems: "center" }} p={2}>
         <Alert severity="error">
           That tracking link is invalid or expired. Check the complete link from
           the repair business.
@@ -998,13 +1041,14 @@ export function PublicTrackPage() {
   const repair = query.data;
   return (
     <Box
+      className="product-ui"
       minHeight="100vh"
       bgcolor="transparent"
       py={{ xs: 3, md: 7 }}
       px={2}
     >
       <Box maxWidth={850} mx="auto">
-        <Stack direction="row" alignItems="center" gap={1.5} mb={4}>
+        <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ xs: "flex-start", sm: "center" }} gap={1.5} mb={4}>
           {repair.business.logoImageUrl ? <Box component="img" src={repair.business.logoImageUrl} alt={`${repair.business.name} logo`} sx={{ width: { xs: 100, sm: 140 }, height: 140, objectFit: "contain" }} /> : <BrandLogo className="brand-logo--tracker" />}
           <Box>
             <Typography variant="h5">{repair.business.name}</Typography>
@@ -1024,7 +1068,7 @@ export function PublicTrackPage() {
                 <Typography variant="overline" color="text.secondary">
                   Repair reference
                 </Typography>
-                <Typography variant="h3">{repair.reference}</Typography>
+                <Typography component="h1" sx={{ fontSize: { xs: 30, sm: 42 }, lineHeight: 1.2, fontWeight: 750, letterSpacing: "-.04em", overflowWrap: "anywhere" }}>{repair.reference}</Typography>
                 <Typography color="text.secondary">
                   {repair.device.brand} {repair.device.model} ·{" "}
                   {repair.device.type}
@@ -1082,7 +1126,7 @@ export function PublicTrackPage() {
                 {repair.invoices.map((invoice) => (
                   <Stack
                     key={invoice.number}
-                    direction="row"
+                    direction={{ xs: "column", sm: "row" }}
                     justifyContent="space-between"
                     py={1}
                   >

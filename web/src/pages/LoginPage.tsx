@@ -1,6 +1,6 @@
 import LockOutlined from "@mui/icons-material/LockOutlined";
 import MailOutline from "@mui/icons-material/MailOutline";
-import { Alert, Box, Button, Checkbox, CircularProgress, FormControlLabel, InputAdornment, Link, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, CircularProgress, InputAdornment, Link, Stack, TextField, Typography } from "@mui/material";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link as RouterLink, Navigate, useLocation, useNavigate } from "react-router-dom";
@@ -22,16 +22,16 @@ export function LoginPage() {
     try { await login(values.email, values.password); void navigate((location.state as { from?: string } | null)?.from ?? "/", { replace: true }); }
     catch (reason) { setError(apiMessage(reason)); }
   });
-  return <Box className="login-shell">
+  return <Box className="login-shell product-ui">
     <Box className="login-panel"><Box width="100%" maxWidth={430}>
       <Box mb={4}><BrandLogo className="brand-logo--login" /></Box>
-      <Typography variant="h3" fontWeight={800} letterSpacing="-.055em" mb={1}>Welcome back</Typography>
+      <Typography component="h1" variant="h3" fontWeight={750} letterSpacing="-.045em" mb={1}>Welcome back</Typography>
       <Typography color="text.secondary" mb={4}>Sign in to manage repairs and digital projects, or track your own service request.</Typography>
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       <Stack component="form" onSubmit={(event) => void submit(event)} spacing={2.2} noValidate>
         <TextField label="Email address" type="email" autoComplete="email" error={Boolean(errors.email)} helperText={errors.email?.message} {...register("email", { required: "Enter your email address.", pattern: { value: /^\S+@\S+\.\S+$/, message: "Enter a valid email address." } })} slotProps={{ input: { startAdornment: <InputAdornment position="start"><MailOutline fontSize="small" /></InputAdornment> } }} />
         <TextField label="Password" type="password" autoComplete="current-password" error={Boolean(errors.password)} helperText={errors.password?.message} {...register("password", { required: "Enter your password." })} slotProps={{ input: { startAdornment: <InputAdornment position="start"><LockOutlined fontSize="small" /></InputAdornment> } }} />
-        <Stack direction="row" alignItems="center" justifyContent="space-between"><FormControlLabel control={<Checkbox defaultChecked />} label={<Typography variant="body2">Keep me signed in</Typography>} /><Link component={RouterLink} to="/forgot-password" fontWeight={700} variant="body2">Forgot password?</Link></Stack>
+        <Box textAlign="right"><Link component={RouterLink} to="/forgot-password" fontWeight={700} variant="body2">Forgot password?</Link></Box>
         <Button type="submit" size="large" variant="contained" disabled={isSubmitting}>{isSubmitting ? <CircularProgress size={22} color="inherit" /> : "Sign in securely"}</Button>
       </Stack>
       <Typography textAlign="center" color="text.secondary" mt={3}>New customer? <Link component={RouterLink} to="/signup" fontWeight={750}>Create an account</Link></Typography>

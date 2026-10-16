@@ -12,6 +12,7 @@ describe("password-only sign in", () => {
     expect(screen.getByRole("button", { name: "Sign in securely" })).toBeVisible();
     expect(screen.queryByText(/Google|VITE_GOOGLE_CLIENT_ID/)).not.toBeInTheDocument();
     expect(screen.queryByText("or")).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Keep me signed in" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Forgot password?" })).toBeVisible();
   });
   it("preserves genuine password-login error feedback", async () => {

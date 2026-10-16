@@ -4,6 +4,7 @@ import Download from "@mui/icons-material/Download";
 import Email from "@mui/icons-material/Email";
 import Payment from "@mui/icons-material/Payment";
 import RemoveCircleOutline from "@mui/icons-material/RemoveCircleOutline";
+import SearchOutlined from "@mui/icons-material/SearchOutlined";
 import {
   Alert,
   Box,
@@ -14,9 +15,12 @@ import {
   Grid,
   IconButton,
   InputAdornment,
+  LinearProgress,
   MenuItem,
   Paper,
   Stack,
+  Tab,
+  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
@@ -24,6 +28,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import {
   Link,
+  useLocation,
   useNavigate,
   useParams,
   useSearchParams,
@@ -118,7 +123,10 @@ async function downloadFile(url: string, filename: string) {
 
 export function InvoicesPage() {
   const { user } = useAuth();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
+  const search = params.get("q") ?? "";
+  const paymentFilter = params.get("payment") ?? "";
+  const order = params.get("order") ?? "newest";
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(user?.role === "BUSINESS_ADMIN" && Boolean(params.get("digitalTicketId")));
@@ -195,11 +203,14 @@ export function InvoicesPage() {
   });
   if (invoices.isLoading) return <LoadingBlock />;
   if (invoices.error)
-    return <ErrorBlock message={apiMessage(invoices.error)} />;
-  const rows = (invoices.data ?? []).map((invoice) => [
+    return <ErrorBlock message={apiMessage(invoices.error)} retry={() => void invoices.refetch()} />;
+  function filterView(key: string, value: string) { setParams((previous) => { const next = new URLSearchParams(previous); if (value) next.set(key, value); else next.delete(key); return next; }, { replace: true }); }
+  const visibleInvoices = (invoices.data ?? []).filter((invoice) => (!paymentFilter || invoice.paymentStatus === paymentFilter) && `${invoice.number} ${invoice.customer.fullName} ${invoice.digitalTicket?.reference ?? ""} ${invoice.repair?.reference ?? ""}`.toLowerCase().includes(search.trim().toLowerCase())).sort((a, b) => order === "balance" ? Number(b.balance) - Number(a.balance) : order === "oldest" ? new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() : new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const rows = visibleInvoices.map((invoice) => [
     <Button
       component={Link}
       to={`/invoices/${invoice.id}`}
+      state={{ invoiceListSearch: params.toString() }}
       sx={{ p: 0, fontWeight: 800 }}
     >
       {invoice.number}
@@ -227,7 +238,19 @@ export function InvoicesPage() {
           ) : undefined
         }
       />
+      <Paper sx={{ p: { xs: 2, sm: 2.5 }, mb: 3 }}>
+        <Stack direction={{ xs: "column", md: "row" }} gap={2}>
+          <TextField fullWidth size="small" label="Search loaded invoices" placeholder="Invoice, customer or ticket" value={search} onChange={(event) => filterView("q", event.target.value)} slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchOutlined fontSize="small" /></InputAdornment> } }} />
+          <TextField select size="small" label="Payment status" value={paymentFilter} onChange={(event) => filterView("payment", event.target.value)} sx={{ minWidth: 190 }}><MenuItem value="">All payments</MenuItem>{["UNPAID", "PARTIALLY_PAID", "PAID"].map((value) => <MenuItem key={value} value={value}>{value.replaceAll("_", " ").toLowerCase()}</MenuItem>)}</TextField>
+          <TextField select size="small" label="Order loaded invoices" value={order} onChange={(event) => filterView("order", event.target.value)} sx={{ minWidth: 190 }}><MenuItem value="newest">Newest first</MenuItem><MenuItem value="oldest">Oldest first</MenuItem><MenuItem value="balance">Largest balance</MenuItem></TextField>
+        </Stack>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1} mt={1.5}><Typography variant="caption" color="text.secondary">{visibleInvoices.length} shown · {invoices.data?.length ?? 0} loaded. The latest 100 invoices are available in this view.</Typography>{(search || paymentFilter) && <Button size="small" onClick={() => { setParams((previous) => { const next = new URLSearchParams(previous); next.delete("q"); next.delete("payment"); return next; }, { replace: true }); }}>Clear filters</Button>}</Stack>
+        {invoices.isFetching && <LinearProgress aria-label="Refreshing invoices" sx={{ mt: 1.5 }} />}
+      </Paper>
       <DataTable
+        caption="Invoice ledger · amounts and payment status"
+        rowKeys={visibleInvoices.map((invoice) => invoice.id)}
+        empty={invoices.data?.length ? "No loaded invoices match these filters. Clear the filters to see the invoice ledger." : "No invoices yet. Create a draft for a repair, digital project or general service."}
         columns={[
           "Invoice",
           "Customer",
@@ -243,6 +266,8 @@ export function InvoicesPage() {
       <FormDialog
         open={open}
         title="Create invoice"
+        description="Choose the customer and linked job, then enter itemised charges. Nothing is issued or sent until you explicitly do so."
+        maxWidth="md"
         busy={create.isPending}
         error={create.error ? apiMessage(create.error) : undefined}
         onClose={() => setOpen(false)}
@@ -439,6 +464,12 @@ export function InvoicesPage() {
 }
 
 export function InvoiceDetailPage() {
+  const location = useLocation();
+  const savedSearch = (location.state as { invoiceListSearch?: string } | null)?.invoiceListSearch;
+  const returnParams = new URLSearchParams();
+  const contextParams = new URLSearchParams(savedSearch ?? "");
+  for (const key of ["q", "payment", "order"]) { const value = contextParams.get(key); if (value) returnParams.set(key, value); }
+  const returnPath = `/invoices${returnParams.size ? `?${returnParams.toString()}` : ""}`;
   const { id = "" } = useParams();
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -449,6 +480,7 @@ export function InvoiceDetailPage() {
   const [reference, setReference] = useState("");
   const [paperWidth, setPaperWidth] = useState("A4");
   const [notice, setNotice] = useState("");
+  const fileDownload = useMutation({ mutationFn: ({ url, filename }: { url: string; filename: string }) => downloadFile(url, filename) });
   const query = useQuery({
     queryKey: ["invoice", id],
     queryFn: async () =>
@@ -486,14 +518,14 @@ export function InvoiceDetailPage() {
   });
   if (query.isLoading) return <LoadingBlock />;
   if (query.error || !query.data)
-    return <ErrorBlock message={apiMessage(query.error)} />;
+    return <ErrorBlock message={apiMessage(query.error)} retry={() => void query.refetch()} />;
   const invoice = query.data;
   const kraEnabled = invoice.kraEnabled ?? invoice.business.taxSettings?.etimsEnabled === true;
   return (
     <>
       <Button
         component={Link}
-        to="/invoices"
+        to={returnPath}
         startIcon={<ArrowBack />}
         sx={{ mb: 2 }}
       >
@@ -506,18 +538,14 @@ export function InvoiceDetailPage() {
           <Stack direction="row" flexWrap="wrap" gap={1}>
             <Button
               startIcon={<Download />}
-              onClick={() =>
-                void downloadFile(
-                  `/invoices/${id}/pdf`,
-                  `${invoice.number}.pdf`,
-                )
-              }
+              onClick={() => fileDownload.mutate({ url: `/invoices/${id}/pdf`, filename: `${invoice.number}.pdf` })}
+              disabled={fileDownload.isPending}
             >
               PDF
             </Button>
             {user?.role === "BUSINESS_ADMIN" && invoice.status === "DRAFT" && (
-              <Button variant="outlined" onClick={() => issue.mutate()}>
-                Issue invoice
+              <Button variant="contained" onClick={() => issue.mutate()} disabled={issue.isPending}>
+                {issue.isPending ? "Issuing…" : "Issue invoice"}
               </Button>
             )}
             {user?.role === "BUSINESS_ADMIN" && ["ISSUED", "PARTIALLY_PAID", "PAID"].includes(invoice.status) && (
@@ -555,6 +583,7 @@ export function InvoiceDetailPage() {
           {notice}
         </Alert>
       )}
+      {(issue.error || email.error || fileDownload.error) && <Alert severity="error" sx={{ mb: 3 }}>{apiMessage(issue.error ?? email.error ?? fileDownload.error)} No successful action has been confirmed. You can try again.</Alert>}
       {user?.role === "BUSINESS_ADMIN" && <InvoiceManagementPanel invoiceId={id} status={invoice.status} paymentStatus={invoice.paymentStatus} kraEtimsStatus={invoice.kraStatus} kraEnabled={kraEnabled} manualDigital={Boolean(invoice.digitalTicketId || invoice.digitalTicket)} invoiceDiscount={invoice.invoiceLevelDiscount} dueAt={invoice.dueAt} terms={invoice.terms} notes={invoice.notes} items={invoice.items} refresh={refresh} />}
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, lg: 8 }}>
@@ -675,7 +704,7 @@ export function InvoiceDetailPage() {
                     borderBottom={1}
                     borderColor="divider"
                   >
-                    <Stack direction="row" justifyContent="space-between">
+                    <Stack direction={{ xs: "column", sm: "row" }} gap={1} justifyContent="space-between">
                       <Typography fontWeight={700}>{entry.number}</Typography>
                       <Typography fontWeight={800}>
                         KES {Number(entry.amount).toLocaleString()}
@@ -696,12 +725,8 @@ export function InvoiceDetailPage() {
                   key={receipt.id}
                   size="small"
                   startIcon={<Download />}
-                  onClick={() =>
-                    void downloadFile(
-                      `/invoices/receipts/${receipt.id}/pdf?paperWidth=${paperWidth}`,
-                      `${receipt.number}-${paperWidth}.pdf`,
-                    )
-                  }
+                  disabled={fileDownload.isPending}
+                  onClick={() => fileDownload.mutate({ url: `/invoices/receipts/${receipt.id}/pdf?paperWidth=${paperWidth}`, filename: `${receipt.number}-${paperWidth}.pdf` })}
                 >
                   {receipt.number} receipt
                 </Button>
@@ -713,6 +738,7 @@ export function InvoiceDetailPage() {
       <FormDialog
         open={payOpen}
         title="Record payment"
+        description="Record a payment already received. This updates the invoice balance and creates an auditable receipt; it does not charge a payment card."
         busy={payment.isPending}
         error={payment.error ? apiMessage(payment.error) : undefined}
         onClose={() => setPayOpen(false)}
@@ -722,6 +748,7 @@ export function InvoiceDetailPage() {
         <TextField
           required
           type="number"
+          slotProps={{ htmlInput: { min: 0.01, max: Number(invoice.balance), step: 0.01 } }}
           label="Amount"
           value={amount}
           onChange={(event) => setAmount(event.target.value)}
@@ -815,6 +842,8 @@ interface AnalyticsData {
 }
 interface ProfitData { from: string; to: string; revenue: number; partsRevenue: number; labourRevenue: number; costOfParts: number; grossProfit: number; utilityCosts: number; otherBusinessCosts: number; operatingExpenses: number; operatingProfit: number; profitMarginPercent: number; methodology: "CASH_BASIS" }
 export function ReportsPage() {
+  const [reportView, setReportView] = useState("period");
+  const exportReport = useMutation({ mutationFn: () => downloadFile("/reports/repairs.csv", "repair-report.csv") });
   const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [from, setFrom] = useState(() => {
     const value = new Date();
@@ -838,7 +867,7 @@ export function ReportsPage() {
   const profit = useQuery({ queryKey: ["profit-report", from, to], queryFn: async () => (await api.get<ApiEnvelope<ProfitData>>("/reports/profit", { params: { from, to } })).data.data });
   if (query.isLoading || analytics.isLoading || profit.isLoading) return <LoadingBlock />;
   if (query.error || analytics.error || profit.error || !query.data || !analytics.data || !profit.data)
-    return <ErrorBlock message={apiMessage(query.error ?? analytics.error ?? profit.error)} />;
+    return <ErrorBlock message={apiMessage(query.error ?? analytics.error ?? profit.error)} retry={() => { void query.refetch(); void analytics.refetch(); void profit.refetch(); }} />;
   const data = query.data;
   const detail = analytics.data;
   const finances = profit.data;
@@ -851,15 +880,16 @@ export function ReportsPage() {
           <Button
             variant="contained"
             startIcon={<Download />}
-            onClick={() =>
-              void downloadFile("/reports/repairs.csv", "repair-report.csv")
-            }
+            onClick={() => exportReport.mutate()}
+            disabled={exportReport.isPending}
           >
-            Export repair CSV
+            Export all repair CSV
           </Button>
         }
       />
-      <Paper sx={{ p: 2, mb: 3 }}>
+      {exportReport.error && <Alert severity="error" sx={{ mb: 2 }}>{apiMessage(exportReport.error)}</Alert>}
+      <Tabs value={reportView} onChange={(_, value: string) => setReportView(value)} aria-label="Report views" sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}><Tab id="reports-period-tab" aria-controls="reports-period" label="Period analysis" value="period" /><Tab id="reports-workspace-tab" aria-controls="reports-workspace" label="Workspace snapshot" value="workspace" /></Tabs>
+      {reportView === "period" && <Paper sx={{ p: 2.5, mb: 3 }}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
           <TextField
             type="date"
@@ -876,8 +906,11 @@ export function ReportsPage() {
             InputLabelProps={{ shrink: true }}
           />
         </Stack>
-      </Paper>
-      <Grid container spacing={2.5}>
+        <Typography variant="caption" color="text.secondary" display="block" mt={1.5}>These dates apply to period analysis only. The repair CSV export includes all available repairs, not just this date range.</Typography>
+      </Paper>}
+      {reportView === "workspace" && <Typography variant="body2" color="text.secondary" mb={3}>Current workspace balances and historical monthly trends. These figures are not filtered by the selected analysis dates.</Typography>}
+      <Grid container spacing={2.5} role="tabpanel" id={`reports-${reportView}`} aria-labelledby={`reports-${reportView}-tab`}>
+        {reportView === "period" && <>
         <Grid size={{ xs: 12 }}><Alert severity="info">Profit uses cash-basis accounting for this period: payments received minus historical parts cost and recorded operating expenses. It is an operational report, not audited tax advice.</Alert></Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Card><CardContent><KeyValue label="Cash revenue" value={`KES ${finances.revenue.toLocaleString()}`} /></CardContent></Card></Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Card><CardContent><KeyValue label="Gross profit" value={`KES ${finances.grossProfit.toLocaleString()}`} /></CardContent></Card></Grid>
@@ -885,6 +918,8 @@ export function ReportsPage() {
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}><Card><CardContent><KeyValue label="Operating profit" value={`KES ${finances.operatingProfit.toLocaleString()} (${finances.profitMarginPercent}%)`} /></CardContent></Card></Grid>
         <Grid size={{ xs: 12, lg: 6 }}><Card><CardContent><Typography variant="h6" mb={2}>Revenue composition</Typography><DataTable columns={["Category", "Amount"]} rows={[["Labour", `KES ${finances.labourRevenue.toLocaleString()}`], ["Parts", `KES ${finances.partsRevenue.toLocaleString()}`], ["Other paid revenue", `KES ${Math.max(finances.revenue - finances.labourRevenue - finances.partsRevenue, 0).toLocaleString()}`]]} /></CardContent></Card></Grid>
         <Grid size={{ xs: 12, lg: 6 }}><Card><CardContent><Typography variant="h6" mb={2}>Cost composition</Typography><DataTable columns={["Category", "Amount"]} rows={[["Historical parts cost", `KES ${finances.costOfParts.toLocaleString()}`], ["Utilities", `KES ${finances.utilityCosts.toLocaleString()}`], ["Other business costs", `KES ${finances.otherBusinessCosts.toLocaleString()}`]]} /></CardContent></Card></Grid>
+        </>}
+        {reportView === "workspace" && <>
         <Grid size={{ xs: 12, md: 4 }}>
           <Card>
             <CardContent>
@@ -944,6 +979,8 @@ export function ReportsPage() {
             </CardContent>
           </Card>
         </Grid>
+        </>}
+        {reportView === "period" && <>
         <Grid size={{ xs: 12, lg: 6 }}>
           <Card>
             <CardContent>
@@ -1058,6 +1095,7 @@ export function ReportsPage() {
             </CardContent>
           </Card>
         </Grid>
+        </>}
       </Grid>
     </>
   );

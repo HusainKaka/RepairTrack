@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Role } from "../types";
 
@@ -90,6 +90,123 @@ describe("manual repair WhatsApp sharing", () => {
     await screen.findByText("Does not power on");
     await waitFor(() => expect(mocks.get).toHaveBeenCalledWith("/repairs/repair-id/tracking"));
     expect(screen.queryByRole("link", { name: "Send to WhatsApp" })).not.toBeInTheDocument();
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+});
+
+function RouteContext() {
+  const location = useLocation();
+  return <output aria-label="Current route">{location.pathname}{location.search}</output>;
+}
+
+function mountWorkflow(path = "/repairs") {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}><Routes><Route path="/repairs" element={<><RepairsPage /><RouteContext /></>} /><Route path="/repairs/:id" element={<><RepairDetailPage /><RouteContext /></>} /></Routes></MemoryRouter></QueryClientProvider>);
+}
+
+describe("workshop ledger context and role boundaries", () => {
+  it("restores URL-backed search, status and local order after detail navigation", async () => {
+    mountWorkflow("/repairs?q=power&status=RECEIVED&sort=oldest");
+    expect(await screen.findByRole("textbox", { name: "Search loaded jobs" })).toHaveValue("power");
+    expect(screen.getByRole("combobox", { name: "Status" })).toHaveTextContent("Received");
+    expect(screen.getByRole("combobox", { name: "Order loaded jobs" })).toHaveTextContent("Oldest received");
+    fireEvent.click(screen.getByRole("link", { name: repair.reference }));
+    const back = await screen.findByRole("link", { name: "Back to repairs" });
+    expect(back).toHaveAttribute("href", "/repairs?q=power&status=RECEIVED&sort=oldest");
+    fireEvent.click(back);
+    expect(await screen.findByRole("textbox", { name: "Search loaded jobs" })).toHaveValue("power");
+    expect(screen.getByLabelText("Current route")).toHaveTextContent("/repairs?q=power&status=RECEIVED&sort=oldest");
+    expect(mocks.get).toHaveBeenCalledWith("/repairs", { params: { status: "RECEIVED" } });
+  });
+
+  it("distinguishes no matches and clears only the working filter context", async () => {
+    mountWorkflow("/repairs?q=does-not-match");
+    await screen.findByText("No jobs match this view");
+    expect(screen.getByText(/Up to 100 jobs are loaded per status/)).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Clear filters" })[0]);
+    expect(await screen.findByRole("link", { name: repair.reference })).toBeInTheDocument();
+    expect(screen.getByLabelText("Current route")).toHaveTextContent("/repairs");
+  });
+
+  it("does not render forbidden invoice navigation for an assigned technician", async () => {
+    mocks.role = "TECHNICIAN";
+    const detail = { ...repair, invoices: [{ id: "invoice-id", number: "INV-0042", paymentStatus: "UNPAID", balance: "2500" }] };
+    mocks.get.mockImplementation((path: string) => Promise.resolve({ data: { data: path === "/inventory" ? [] : path.endsWith("/tracking") ? { trackingUrl } : detail } }));
+    mount(<RepairDetailPage />, "/repairs/repair-id", "/repairs/:id");
+    expect(await screen.findByText("INV-0042")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "INV-0042" })).not.toBeInTheDocument();
+    expect(screen.getByText(/managed by the administrator/)).toBeInTheDocument();
+  });
+
+  it("keeps customer views read-only and excludes internal content even in an overbroad response", async () => {
+    mocks.role = "CUSTOMER";
+    const detail = { ...repair, diagnosis: "Private diagnosis", internalNotes: "Private intake", notes: [{ id: "private", body: "Private workshop note", visibility: "INTERNAL", author: { fullName: "Technician" }, createdAt: repair.createdAt }, { id: "public", body: "Your device is being checked", visibility: "CUSTOMER", author: { fullName: "Repair team" }, createdAt: repair.createdAt }] };
+    mocks.get.mockResolvedValue({ data: { data: detail } });
+    mount(<RepairDetailPage />, "/repairs/repair-id", "/repairs/:id");
+    await screen.findByText("Your device is being checked");
+    for (const text of ["Private diagnosis", "Private intake", "Private workshop note"]) expect(screen.queryByText(text)).not.toBeInTheDocument();
+    for (const name of ["Start diagnosis", "Add note", "Add part", "Archive", "Accept job"]) expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    expect(screen.getByText("Your device has been received by the workshop.")).toBeInTheDocument();
+    expect(mocks.get.mock.calls.some(([path]) => path === "/inventory" || String(path).endsWith("/tracking"))).toBe(false);
+  });
+});
+
+describe("repair mutation feedback and safety", () => {
+  it("opens only valid next-stage choices and locks a pending update", async () => {
+    let finish!: (value: unknown) => void;
+    mocks.post.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    mount(<RepairDetailPage />, "/repairs/repair-id", "/repairs/:id");
+    fireEvent.click(await screen.findByRole("button", { name: "Start diagnosis" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "New status" }));
+    expect(screen.getByRole("option", { name: "Diagnosing" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Cancelled" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Collected" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: "Diagnosing" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Customer message (optional)" }), { target: { value: "We are checking the power issue." } });
+    fireEvent.click(screen.getByRole("button", { name: "Update and notify" }));
+    await waitFor(() => expect(mocks.post).toHaveBeenCalledTimes(1));
+    expect(mocks.post).toHaveBeenCalledWith("/repairs/repair-id/status", { status: "DIAGNOSING", customerMessage: "We are checking the power issue." });
+    const saving = await screen.findByRole("button", { name: "Saving…" });
+    expect(saving).toBeDisabled();
+    fireEvent.click(saving);
+    expect(mocks.post).toHaveBeenCalledTimes(1);
+    await act(async () => { finish({ data: { data: repair } }); await Promise.resolve(); });
+    expect(await screen.findByText("Repair stage updated. The customer notification has been requested.")).toBeInTheDocument();
+  });
+
+  it("keeps note text and visibility after failure and allows recovery", async () => {
+    mocks.post.mockRejectedValue(new Error("network"));
+    mount(<RepairDetailPage />, "/repairs/repair-id", "/repairs/:id");
+    fireEvent.click(await screen.findByRole("button", { name: "Add note" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Note" }), { target: { value: "Checked the charging port.\nFurther testing required." } });
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+    await screen.findByText("Request unavailable");
+    expect(screen.getByRole("textbox", { name: "Note" })).toHaveValue("Checked the charging port.\nFurther testing required.");
+    expect(screen.getByRole("combobox", { name: "Visibility" })).toHaveTextContent("Internal workshop note");
+    expect(screen.getByRole("button", { name: "Save note" })).toBeEnabled();
+    expect(mocks.post).toHaveBeenCalledWith("/repairs/repair-id/notes", { body: "Checked the charging port.\nFurther testing required.", visibility: "INTERNAL", imageUrls: [] });
+  });
+
+  it("confirms clipboard completion without claiming a customer message was sent", async () => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    mount(<RepairDetailPage />, "/repairs/repair-id", "/repairs/:id");
+    fireEvent.click(await screen.findByRole("button", { name: "Copy tracking link" }));
+    expect(await screen.findByText("Private tracking link copied.")).toBeInTheDocument();
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(trackingUrl);
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+
+  it("explains inventory side effects and blocks invalid consumption quantities", async () => {
+    const item = { id: "item-id", name: "Replacement port", quantity: 2 };
+    mocks.get.mockImplementation((path: string) => Promise.resolve({ data: { data: path === "/inventory" ? [item] : path.endsWith("/tracking") ? { trackingUrl } : repair } }));
+    mount(<RepairDetailPage />, "/repairs/repair-id", "/repairs/:id");
+    fireEvent.click(await screen.findByRole("button", { name: "Add part" }));
+    expect(screen.getByText(/deducts stock and adds its charge/)).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog");
+    fireEvent.mouseDown(within(dialog).getByRole("combobox", { name: "Inventory item" }));
+    fireEvent.click(screen.getByRole("option", { name: "Replacement port · 2 available" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Quantity" }), { target: { value: "1.5" } });
+    expect(screen.getByRole("button", { name: "Consume stock" })).toBeDisabled();
     expect(mocks.post).not.toHaveBeenCalled();
   });
 });
