@@ -463,14 +463,14 @@ export function RepairDetailPage() {
   });
   const tracking = useQuery({
     queryKey: ["repair-tracking", id],
-    queryFn: async () => (await api.get<ApiEnvelope<{ trackingUrl: string }>>(`/repairs/${encodeURIComponent(id)}/tracking`)).data.data,
+    queryFn: async () => (await api.get<ApiEnvelope<{ trackingUrl: string; reviewUrl?: string | null }>>(`/repairs/${encodeURIComponent(id)}/tracking`)).data.data,
     enabled: Boolean(query.data && (user?.role === "BUSINESS_ADMIN" || (user?.role === "TECHNICIAN" && query.data.assignedTechnician?.id === user.id))),
     retry: false,
   });
   const inventory = useQuery({
     queryKey: ["inventory"],
     queryFn: async () => (await api.get<ApiEnvelope<InventoryItem[]>>("/inventory")).data.data,
-    enabled: user?.role === "BUSINESS_ADMIN" || user?.role === "TECHNICIAN",
+    enabled: partOpen && (user?.role === "BUSINESS_ADMIN" || user?.role === "TECHNICIAN"),
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["repair", id] });
   const statusMutation = useMutation({
@@ -481,6 +481,7 @@ export function RepairDetailPage() {
       setNextStatus("");
       setNotice("Repair stage updated. The customer notification has been requested.");
       await refresh();
+      await queryClient.invalidateQueries({ queryKey: ["repair-tracking", id] });
       await queryClient.invalidateQueries({ queryKey: ["repairs"] });
     },
   });
@@ -532,7 +533,7 @@ export function RepairDetailPage() {
     {notice && <Alert severity="success" role="status" onClose={() => setNotice("")} sx={{ mb: 2 }}>{notice}</Alert>}
     {acceptMutation.error && <Alert severity="error" sx={{ mb: 2 }}>{apiMessage(acceptMutation.error)}</Alert>}
     {query.isFetching && <LinearProgress aria-label="Refreshing repair workspace" sx={{ mb: 2 }} />}
-    <RepairWorkspace repair={repair} role={user?.role} canEdit={canEdit} trackingUrl={tracking.data?.trackingUrl} trackingBusy={tracking.isPending} trackingError={tracking.error ? `The private tracking link could not be loaded. ${apiMessage(tracking.error)}` : undefined} onRetryTracking={() => void tracking.refetch()} onAddNote={() => { if (!busy) { noteMutation.reset(); setNoteOpen(true); } }} onAddPart={() => { if (!busy) { partMutation.reset(); setPartOpen(true); } }} />
+    <RepairWorkspace repair={repair} role={user?.role} canEdit={canEdit} trackingUrl={tracking.data?.trackingUrl} reviewUrl={tracking.data?.reviewUrl} trackingBusy={tracking.isPending} trackingError={tracking.error ? `The private tracking link could not be loaded. ${apiMessage(tracking.error)}` : undefined} onRetryTracking={() => void tracking.refetch()} onAddNote={() => { if (!busy) { noteMutation.reset(); setNoteOpen(true); } }} onAddPart={() => { if (!busy) { partMutation.reset(); setPartOpen(true); } }} />
     <FormDialog open={statusOpen} title="Move repair to next stage" busy={statusMutation.isPending} error={statusMutation.error ? apiMessage(statusMutation.error) : undefined} onClose={() => setStatusOpen(false)} onSubmit={() => statusMutation.mutate()} submitLabel="Update and notify" dirty={Boolean(customerMessage)} description="Choose a supported next stage. A customer message is visible in the public timeline and included in the notification request.">
       <TextField select required label="New status" value={nextStatus} onChange={(event) => setNextStatus(event.target.value)}>{nextOptions.map((value) => <MenuItem key={value} value={value}>{sentenceCase(value)}</MenuItem>)}</TextField>
       <TextField multiline minRows={3} label="Customer message (optional)" inputProps={{ maxLength: 1000 }} value={customerMessage} onChange={(event) => setCustomerMessage(event.target.value)} helperText="Visible to the customer. Do not include workshop-only information." />

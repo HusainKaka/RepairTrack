@@ -3,7 +3,9 @@ packages:
   - web
 
 overrides:
-  qs: ^6.16.0
+  qs: ^6.16.1
+  'body-parser@>=2 <3': ^2.4.0
+  follow-redirects: ^1.16.1
   proxy-addr: ^2.0.8
   js-yaml: ^4.3.2
   source-map-js: ^1.2.2

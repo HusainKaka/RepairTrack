@@ -1,16 +1,36 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const prisma = vi.hoisted(() => ({ digitalTicket: { findUnique: vi.fn() }, repair: { findUnique: vi.fn() }, invoice: { findUnique: vi.fn() }, notification: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() }, setting: { findUnique: vi.fn() } }));
+const prisma = vi.hoisted(() => ({ digitalTicket: { findUnique: vi.fn() }, repair: { findUnique: vi.fn() }, invoice: { findUnique: vi.fn() }, user: { findMany: vi.fn() }, notification: { findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() }, setting: { findUnique: vi.fn() } }));
 const sendWhatsAppTicketMessage = vi.hoisted(() => vi.fn());
 const sendMail = vi.hoisted(() => vi.fn());
 vi.mock("../src/lib/prisma.js", () => ({ prisma }));
 vi.mock("../src/modules/notifications/whatsapp-provider.js", () => ({ sendWhatsAppTicketMessage }));
 vi.mock("../src/lib/mail.js", () => ({ mailProvider: { send: sendMail } }));
 import { Prisma } from "../src/generated/prisma/index.js";
-import { notifyDigitalTicketCreated, notifyInvoiceEvent, notifyRepairCreated, retryWhatsAppNotification } from "../src/modules/notifications/notification.service.js";
+import { notifyDigitalTicketCreated, notifyInvoiceEvent, notifyRepairCreated, notifyRepairStatus, retryWhatsAppNotification } from "../src/modules/notifications/notification.service.js";
 
 const ticket = () => ({ id: "ticket-id", businessId: "business-id", kind: "WEBSITE", reference: "WEB-2026-000001", title: "Business website", requirements: "PRIVATE REQUIREMENTS", internalNotes: "PRIVATE NOTES", status: "INTAKE", createdAt: new Date(), deletedAt: null, publicTrackingTokenEncrypted: null, business: { name: "Brand", status: "ACTIVE", deletedAt: null as Date | null, email: "brand@example.test", phone: "+254722110000", address: "Nairobi", city: "Nairobi" }, customer: { fullName: "Customer", deletedAt: null as Date | null, userId: null, user: null, email: "customer@example.test", phone: "+254722110001", whatsappPhone: null, preferredCommunication: "EMAIL", whatsappOptIn: true } });
 beforeEach(() => { vi.clearAllMocks(); prisma.notification.findFirst.mockResolvedValue(null); prisma.notification.create.mockResolvedValue({ id: "notification-id" }); prisma.notification.update.mockResolvedValue({}); prisma.setting.findUnique.mockResolvedValue(null); sendWhatsAppTicketMessage.mockResolvedValue({ configured: true, providerId: "wamid.test-ack" }); sendMail.mockResolvedValue({ providerId: "mail-ack" }); });
 describe("ticket notifications consent and privacy", () => {
+  it("adds the configured review link to completion email, without sending a WhatsApp review automatically", async () => {
+    const value = ticket();
+    prisma.user.findMany.mockResolvedValue([]);
+    prisma.repair.findUnique.mockResolvedValue({ ...value, reference: "RT-2026-000001", status: "COMPLETED", notificationPreferenceOverride: null, device: { brand: "Brand", model: "Model", type: "LAPTOP" }, invoices: [] });
+    prisma.setting.findUnique.mockImplementation(async ({ where }) => where.scope_key.key === "reviews.google" ? { businessId: value.businessId, value: { googleReviewUrl: "https://g.page/r/Cbadgp9VKwYjEBI/review" } } : null);
+    await notifyRepairStatus("ticket-id");
+    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ html: expect.stringContaining("https://g.page/r/Cbadgp9VKwYjEBI/review"), text: expect.stringContaining("Leave a Google review") }));
+    expect(sendWhatsAppTicketMessage).not.toHaveBeenCalled();
+    prisma.notification.findFirst.mockResolvedValue({ id: "already-notified" });
+    await notifyRepairStatus("ticket-id");
+    expect(sendMail).toHaveBeenCalledOnce();
+  });
+  it("does not send a completion review email when the customer prefers WhatsApp", async () => {
+    const value = ticket(); value.customer.preferredCommunication = "WHATSAPP";
+    prisma.user.findMany.mockResolvedValue([]);
+    prisma.repair.findUnique.mockResolvedValue({ ...value, reference: "RT-2026-000001", status: "COMPLETED", notificationPreferenceOverride: null, device: { brand: "Brand", model: "Model", type: "LAPTOP" }, invoices: [] });
+    await notifyRepairStatus("ticket-id");
+    expect(sendMail).not.toHaveBeenCalled();
+    expect(JSON.stringify(sendWhatsAppTicketMessage.mock.calls)).not.toContain("g.page");
+  });
   it("automatically sends intake WhatsApp even with email preference, but only with explicit consent", async () => {
     prisma.digitalTicket.findUnique.mockResolvedValue(ticket());
     await notifyDigitalTicketCreated("ticket-id", "https://repair.example/track/digital/token");

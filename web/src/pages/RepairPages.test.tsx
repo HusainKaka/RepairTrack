@@ -26,6 +26,21 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("manual repair WhatsApp sharing", () => {
+  it("offers a manually opened Google review draft only after completion", async () => {
+    const reviewUrl = "https://g.page/r/Cbadgp9VKwYjEBI/review";
+    mocks.get.mockImplementation((path: string) => Promise.resolve({ data: { data: path.endsWith("/tracking") ? { trackingUrl, reviewUrl } : { ...repair, status: "COMPLETED" } } }));
+    mount(<RepairDetailPage />, "/repairs/repair-id", "/repairs/:id");
+    const invite = await screen.findByRole("link", { name: "Request Google review" });
+    expect(new URL(invite.getAttribute("href")!).searchParams.get("text")).toContain(reviewUrl);
+    expect(invite).toHaveAttribute("rel", "noopener noreferrer");
+    expect(mocks.post).not.toHaveBeenCalled();
+  });
+  it("does not offer a review request before the repair is completed", async () => {
+    mount(<RepairDetailPage />, "/repairs/repair-id", "/repairs/:id");
+    await screen.findByRole("heading", { name: repair.reference });
+    expect(screen.queryByRole("link", { name: "Request Google review" })).not.toBeInTheDocument();
+    expect(mocks.get.mock.calls.some(([path]) => path === "/inventory")).toBe(false);
+  });
   it("keeps existing customer contact and the nested intake URL after clearing the form", async () => {
     mocks.post.mockResolvedValue({ data: { success: true, data: { ...repair, trackingUrl } } });
     mount(<RepairsPage />, "/repairs", "/repairs");
@@ -204,7 +219,7 @@ describe("repair mutation feedback and safety", () => {
     expect(screen.getByText(/deducts stock and adds its charge/)).toBeInTheDocument();
     const dialog = screen.getByRole("dialog");
     fireEvent.mouseDown(within(dialog).getByRole("combobox", { name: "Inventory item" }));
-    fireEvent.click(screen.getByRole("option", { name: "Replacement port · 2 available" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Replacement port · 2 available" }));
     fireEvent.change(screen.getByRole("spinbutton", { name: "Quantity" }), { target: { value: "1.5" } });
     expect(screen.getByRole("button", { name: "Consume stock" })).toBeDisabled();
     expect(mocks.post).not.toHaveBeenCalled();

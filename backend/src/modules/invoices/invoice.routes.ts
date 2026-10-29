@@ -18,7 +18,7 @@ import { emailLogoForBusiness, notifyInvoiceEvent } from "../notifications/notif
 import { renderCustomerEmail } from "../notifications/email-templates.js";
 import { calculateInvoice, MAX_INVOICE_MONEY } from "./invoice-calculation.js";
 import { defaultLabourItem, digitalInvoiceItemAllowed, invoiceCanBeEdited, invoiceDeletionAction, invoiceDisplayView } from "./invoice-policy.js";
-import { getInvoiceForAccess, recalculateInvoice } from "./invoice.service.js";
+import { getInvoiceForAccess, recalculateInvoice, reconcileInvoiceStock } from "./invoice.service.js";
 import { submitInvoiceToEtims } from "./kra-etims.service.js";
 import { validateManualPaymentEvidence } from "./payment-provider.js";
 import { createInvoiceShareToken, invoiceShareUrl, verifyInvoiceShareToken } from "./invoice-share.js";
@@ -60,6 +60,7 @@ const itemSchema = z.object({
   itemType: z.enum(InvoiceItemType).default(InvoiceItemType.CUSTOM),
   inventoryItemId: z.uuid().optional(),
 });
+const amendmentFields = { changeReason: z.string().trim().min(3).max(500).optional() };
 
 const invoiceSchema = z.object({
   customerId: z.uuid(), repairId: z.uuid().optional(), digitalTicketId: z.uuid().optional(), dueAt: z.iso.datetime().optional(), invoiceDiscount: z.number().nonnegative().default(0),
@@ -92,10 +93,11 @@ async function resolveItem(businessId: string, allowPriceOverride: boolean, inpu
   return { description: input.description ?? `${inventory.name} (${inventory.sku})`, quantity: input.quantity, unitPrice: requestedPrice, taxRate: input.taxRate, discount: input.discount, itemType: InvoiceItemType.INVENTORY, inventoryItemId: inventory.id, historicalUnitCost: Number(inventory.purchaseCost) };
 }
 
-async function editableInvoice(tx: Prisma.TransactionClient, invoiceId: string, businessId: string) {
+async function editableInvoice(tx: Prisma.TransactionClient, invoiceId: string, businessId: string, changeReason?: string) {
   const invoice = await tx.invoice.findFirst({ where: { id: invoiceId, businessId, deletedAt: null } });
   if (!invoice) throw notFound("Invoice");
-  if (!invoiceCanBeEdited(invoice)) throw new AppError(409, "INVOICE_NOT_EDITABLE", "Only an unpaid draft that has not been submitted to eTIMS can be edited.");
+  if (!invoiceCanBeEdited(invoice)) throw new AppError(409, "INVOICE_NOT_EDITABLE", "Cancelled, voided and submitted/confirmed eTIMS invoices cannot be edited.");
+  if (invoice.status !== InvoiceStatus.DRAFT && !changeReason) throw new AppError(422, "INVOICE_CHANGE_REASON_REQUIRED", "Enter a reason for changing this issued invoice.");
   return invoice;
 }
 
@@ -136,7 +138,7 @@ router.post("/", authorize(RoleCode.BUSINESS_ADMIN), validate(invoiceSchema), as
 router.get("/:id", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.CUSTOMER), async (request, response) => {
   const invoice = await getInvoiceForAccess(prisma, routeParam(request.params.id), requireBusiness(request), request.auth!.role === RoleCode.CUSTOMER ? request.auth!.userId : undefined);
   if (!invoice) throw notFound("Invoice");
-  const display = invoiceDisplayView(invoice);
+  const display = { ...invoiceDisplayView(invoice) as Record<string, unknown>, canEdit: request.auth!.role === RoleCode.BUSINESS_ADMIN && invoiceCanBeEdited(invoice) };
   response.json({ success: true, data: request.auth!.role === RoleCode.CUSTOMER ? customerView(display) : display });
 });
 
@@ -163,64 +165,70 @@ router.post("/:id/share-link", authorize(RoleCode.BUSINESS_ADMIN), shareCreation
   response.status(201).json({ success: true, data: { invoiceUrl: invoiceShareUrl(share.token), expiresAt: share.expiresAt, trackingUrl } });
 });
 
-router.patch("/:id", authorize(RoleCode.BUSINESS_ADMIN), validate(z.object({ dueAt: z.iso.datetime().nullable().optional(), invoiceDiscount: z.number().nonnegative().optional(), terms: z.string().trim().max(2000).nullable().optional(), notes: z.string().trim().max(2000).nullable().optional() })), async (request, response) => {
+router.patch("/:id", authorize(RoleCode.BUSINESS_ADMIN), validate(z.object({ dueAt: z.iso.datetime().nullable().optional(), invoiceDiscount: z.number().nonnegative().max(MAX_INVOICE_MONEY).optional(), terms: z.string().trim().max(2000).nullable().optional(), notes: z.string().trim().max(2000).nullable().optional(), ...amendmentFields }).strict()), async (request, response) => {
   const businessId = requireBusiness(request);
   const updated = await prisma.$transaction(async (tx) => {
-    const invoice = await editableInvoice(tx, routeParam(request.params.id), businessId);
+    const invoice = await editableInvoice(tx, routeParam(request.params.id), businessId, request.body.changeReason);
     await tx.invoice.update({ where: { id: invoice.id }, data: { dueAt: request.body.dueAt ? new Date(request.body.dueAt) : request.body.dueAt, terms: request.body.terms, notes: request.body.notes } });
     await recalculateInvoice(tx, invoice.id, request.body.invoiceDiscount);
-    await writeAudit(tx, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "INVOICE_EDITED", resourceType: "invoice", resourceId: invoice.id, metadata: { fields: Object.keys(request.body) } });
-    return tx.invoice.findUniqueOrThrow({ where: { id: invoice.id }, include: { items: true } });
+    const revised = await tx.invoice.findUniqueOrThrow({ where: { id: invoice.id }, include: { items: true } });
+    await writeAudit(tx, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "INVOICE_EDITED", resourceType: "invoice", resourceId: invoice.id, metadata: { fields: Object.keys(request.body), reason: request.body.changeReason ?? null, previousTotal: String(invoice.total), total: String(revised.total), previousDiscount: String(invoice.invoiceLevelDiscount), invoiceDiscount: String(revised.invoiceLevelDiscount) } });
+    return revised;
   }, { isolationLevel: "Serializable" });
   response.json({ success: true, data: updated });
 });
 
-router.post("/:id/items", authorize(RoleCode.BUSINESS_ADMIN), validate(itemSchema), async (request, response) => {
+router.post("/:id/items", authorize(RoleCode.BUSINESS_ADMIN), validate(itemSchema.extend(amendmentFields)), async (request, response) => {
   const businessId = requireBusiness(request);
   const item = await prisma.$transaction(async (tx) => {
-    const invoice = await editableInvoice(tx, routeParam(request.params.id), businessId);
+    const invoice = await editableInvoice(tx, routeParam(request.params.id), businessId, request.body.changeReason);
     if (invoice.digitalTicketId && !digitalInvoiceItemAllowed(request.body)) throw new AppError(422, "DIGITAL_MANUAL_ITEMS_ONLY", "Digital invoices accept manually entered service or custom items only.");
     const business = await tx.business.findUniqueOrThrow({ where: { id: businessId }, select: { allowInvoicePriceOverride: true } });
     const resolved = await resolveItem(businessId, business.allowInvoicePriceOverride, request.body, tx);
     const line = calculateInvoice([resolved]).lines[0]!;
-    const created = await tx.invoiceItem.create({ data: { businessId, invoiceId: invoice.id, repairId: invoice.repairId, description: resolved.description, quantity: resolved.quantity, unitPrice: resolved.unitPrice, taxRate: resolved.taxRate, discount: resolved.discount, lineTotal: line.lineTotal, itemType: resolved.itemType, inventoryItemId: resolved.inventoryItemId, historicalUnitCost: resolved.historicalUnitCost } });
+    const stockDeductedAt = await reconcileInvoiceStock(tx, invoice, request.auth!.userId, null, resolved);
+    const created = await tx.invoiceItem.create({ data: { businessId, invoiceId: invoice.id, repairId: invoice.repairId, description: resolved.description, quantity: resolved.quantity, unitPrice: resolved.unitPrice, taxRate: resolved.taxRate, discount: resolved.discount, lineTotal: line.lineTotal, itemType: resolved.itemType, inventoryItemId: resolved.inventoryItemId, historicalUnitCost: resolved.historicalUnitCost, stockDeductedAt } });
     await recalculateInvoice(tx, invoice.id);
-    await writeAudit(tx, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "INVOICE_ITEM_ADDED", resourceType: "invoice_item", resourceId: created.id, metadata: { invoiceId: invoice.id, itemType: created.itemType } });
+    await writeAudit(tx, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "INVOICE_ITEM_ADDED", resourceType: "invoice_item", resourceId: created.id, metadata: { invoiceId: invoice.id, itemType: created.itemType, reason: request.body.changeReason ?? null, quantity: String(created.quantity), unitPrice: String(created.unitPrice), discount: String(created.discount) } });
     return created;
   }, { isolationLevel: "Serializable" });
   response.status(201).json({ success: true, data: item });
 });
 
-router.patch("/:id/items/:itemId", authorize(RoleCode.BUSINESS_ADMIN), validate(itemSchema.partial()), async (request, response) => {
+router.patch("/:id/items/:itemId", authorize(RoleCode.BUSINESS_ADMIN), validate(itemSchema.partial().extend(amendmentFields)), async (request, response) => {
   const businessId = requireBusiness(request);
   const updated = await prisma.$transaction(async (tx) => {
-    const invoice = await editableInvoice(tx, routeParam(request.params.id), businessId);
+    const invoice = await editableInvoice(tx, routeParam(request.params.id), businessId, request.body.changeReason);
     const existing = await tx.invoiceItem.findFirst({ where: { id: routeParam(request.params.itemId, "invoice item"), invoiceId: invoice.id, businessId } });
     if (!existing) throw notFound("Invoice item");
-    const merged = { description: request.body.description ?? existing.description, quantity: request.body.quantity ?? Number(existing.quantity), unitPrice: request.body.unitPrice ?? Number(existing.unitPrice), taxRate: request.body.taxRate ?? Number(existing.taxRate), discount: request.body.discount ?? Number(existing.discount), itemType: request.body.itemType ?? existing.itemType, inventoryItemId: request.body.inventoryItemId ?? existing.inventoryItemId ?? undefined };
+    const inventoryItemId = request.body.itemType && request.body.itemType !== InvoiceItemType.INVENTORY ? undefined : request.body.inventoryItemId ?? existing.inventoryItemId ?? undefined;
+    const merged = { description: request.body.description ?? existing.description, quantity: request.body.quantity ?? Number(existing.quantity), unitPrice: request.body.unitPrice ?? Number(existing.unitPrice), taxRate: request.body.taxRate ?? Number(existing.taxRate), discount: request.body.discount ?? Number(existing.discount), itemType: request.body.itemType ?? existing.itemType, inventoryItemId };
     if (invoice.digitalTicketId && !digitalInvoiceItemAllowed(merged)) throw new AppError(422, "DIGITAL_MANUAL_ITEMS_ONLY", "Digital invoices accept manually entered service or custom items only.");
     const business = await tx.business.findUniqueOrThrow({ where: { id: businessId }, select: { allowInvoicePriceOverride: true } });
-    const resolved = await resolveItem(businessId, business.allowInvoicePriceOverride, merged, tx);
+    const unchangedInventoryPrice = merged.inventoryItemId === existing.inventoryItemId && merged.unitPrice === Number(existing.unitPrice);
+    const resolved = await resolveItem(businessId, business.allowInvoicePriceOverride || unchangedInventoryPrice, merged, tx);
     const line = calculateInvoice([resolved]).lines[0]!;
-    const value = await tx.invoiceItem.update({ where: { id: existing.id }, data: { description: resolved.description, quantity: resolved.quantity, unitPrice: resolved.unitPrice, taxRate: resolved.taxRate, discount: resolved.discount, lineTotal: line.lineTotal, itemType: resolved.itemType, inventoryItemId: resolved.inventoryItemId, historicalUnitCost: resolved.historicalUnitCost } });
+    const stockDeductedAt = await reconcileInvoiceStock(tx, invoice, request.auth!.userId, existing, resolved);
+    const value = await tx.invoiceItem.update({ where: { id: existing.id }, data: { description: resolved.description, quantity: resolved.quantity, unitPrice: resolved.unitPrice, taxRate: resolved.taxRate, discount: resolved.discount, lineTotal: line.lineTotal, itemType: resolved.itemType, inventoryItemId: resolved.inventoryItemId ?? null, historicalUnitCost: resolved.inventoryItemId === existing.inventoryItemId ? existing.historicalUnitCost : resolved.historicalUnitCost ?? null, stockDeductedAt } });
     await recalculateInvoice(tx, invoice.id);
-    await writeAudit(tx, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "INVOICE_ITEM_EDITED", resourceType: "invoice_item", resourceId: value.id, metadata: { invoiceId: invoice.id } });
+    await writeAudit(tx, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "INVOICE_ITEM_EDITED", resourceType: "invoice_item", resourceId: value.id, metadata: { invoiceId: invoice.id, reason: request.body.changeReason ?? null, before: { quantity: String(existing.quantity), unitPrice: String(existing.unitPrice), discount: String(existing.discount), taxRate: String(existing.taxRate), inventoryItemId: existing.inventoryItemId }, after: { quantity: String(value.quantity), unitPrice: String(value.unitPrice), discount: String(value.discount), taxRate: String(value.taxRate), inventoryItemId: value.inventoryItemId } } });
     return value;
   }, { isolationLevel: "Serializable" });
   response.json({ success: true, data: updated });
 });
 
-router.delete("/:id/items/:itemId", authorize(RoleCode.BUSINESS_ADMIN), async (request, response) => {
+router.delete("/:id/items/:itemId", authorize(RoleCode.BUSINESS_ADMIN), validate(z.object(amendmentFields).default({})), async (request, response) => {
   const businessId = requireBusiness(request);
   await prisma.$transaction(async (tx) => {
-    const invoice = await editableInvoice(tx, routeParam(request.params.id), businessId);
+    const invoice = await editableInvoice(tx, routeParam(request.params.id), businessId, request.body.changeReason);
     const existing = await tx.invoiceItem.findFirst({ where: { id: routeParam(request.params.itemId, "invoice item"), invoiceId: invoice.id, businessId } });
     if (!existing) throw notFound("Invoice item");
     const itemCount = await tx.invoiceItem.count({ where: { invoiceId: invoice.id, businessId } });
     if (itemCount <= 1) throw new AppError(409, "LAST_INVOICE_ITEM", "An invoice must contain at least one item. Add a replacement before removing this item.");
+    await reconcileInvoiceStock(tx, invoice, request.auth!.userId, existing, null);
     await tx.invoiceItem.delete({ where: { id: existing.id } });
     await recalculateInvoice(tx, invoice.id);
-    await writeAudit(tx, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "INVOICE_ITEM_REMOVED", resourceType: "invoice_item", resourceId: existing.id, metadata: { invoiceId: invoice.id, description: existing.description } });
+    await writeAudit(tx, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "INVOICE_ITEM_REMOVED", resourceType: "invoice_item", resourceId: existing.id, metadata: { invoiceId: invoice.id, description: existing.description, reason: request.body.changeReason ?? null, quantity: String(existing.quantity), unitPrice: String(existing.unitPrice) } });
   }, { isolationLevel: "Serializable" });
   response.status(204).end();
 });
@@ -289,8 +297,8 @@ router.post("/:id/payments", authorize(RoleCode.BUSINESS_ADMIN), validate(z.obje
     if (request.body.amount > Number(invoice.balance)) throw new AppError(409, "PAYMENT_EXCEEDS_BALANCE", "The payment exceeds the outstanding balance.");
     const number = await nextDocumentNumber(tx, businessId, "payment", "PAY");
     const payment = await tx.payment.create({ data: { businessId, invoiceId: invoice.id, customerId: invoice.customerId, recordedById: request.auth!.userId, number, amount: request.body.amount, method: request.body.method, customMethod: request.body.customMethod, transactionReference: request.body.transactionReference, notes: request.body.notes } });
-    const amountPaid = Number(invoice.amountPaid) + request.body.amount;
-    const balance = Math.max(Number(invoice.total) - amountPaid, 0);
+    const amountPaid = Math.round((Number(invoice.amountPaid) + request.body.amount) * 100) / 100;
+    const balance = Math.max(Math.round((Number(invoice.total) - amountPaid) * 100) / 100, 0);
     const paymentStatus = balance === 0 ? PaymentStatus.PAID : PaymentStatus.PARTIALLY_PAID;
     const updatedInvoice = await tx.invoice.update({ where: { id: invoice.id }, data: { amountPaid, balance, paymentStatus, status: balance === 0 ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID } });
     const receiptNumber = await nextDocumentNumber(tx, businessId, "receipt", "RCT");

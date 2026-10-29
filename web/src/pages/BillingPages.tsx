@@ -57,6 +57,7 @@ interface InvoiceLine {
   discount: string;
 }
 interface InvoiceFull extends Invoice {
+  canEdit?: boolean;
   subtotal: string;
   taxAmount: string;
   discountAmount: string;
@@ -486,8 +487,9 @@ export function InvoiceDetailPage() {
     queryFn: async () =>
       (await api.get<ApiEnvelope<InvoiceFull>>(`/invoices/${id}`)).data.data,
   });
-  const refresh = () =>
-    queryClient.invalidateQueries({ queryKey: ["invoice", id] });
+  const refresh = async () => {
+    await Promise.all(["invoices", "repair", "business-dashboard", "customer-invoices", "profit-report", "report-analytics", "reports", "inventory"].map(key => queryClient.invalidateQueries({ queryKey: [key] })).concat(queryClient.invalidateQueries({ queryKey: ["invoice", id] })));
+  };
   const issue = useMutation({
     mutationFn: () => api.post(`/invoices/${id}/issue`),
     onSuccess: refresh,
@@ -584,7 +586,7 @@ export function InvoiceDetailPage() {
         </Alert>
       )}
       {(issue.error || email.error || fileDownload.error) && <Alert severity="error" sx={{ mb: 3 }}>{apiMessage(issue.error ?? email.error ?? fileDownload.error)} No successful action has been confirmed. You can try again.</Alert>}
-      {user?.role === "BUSINESS_ADMIN" && <InvoiceManagementPanel invoiceId={id} status={invoice.status} paymentStatus={invoice.paymentStatus} kraEtimsStatus={invoice.kraStatus} kraEnabled={kraEnabled} manualDigital={Boolean(invoice.digitalTicketId || invoice.digitalTicket)} invoiceDiscount={invoice.invoiceLevelDiscount} dueAt={invoice.dueAt} terms={invoice.terms} notes={invoice.notes} items={invoice.items} refresh={refresh} />}
+      {user?.role === "BUSINESS_ADMIN" && <InvoiceManagementPanel invoiceId={id} status={invoice.status} paymentStatus={invoice.paymentStatus} amountPaid={invoice.amountPaid} canEditInvoice={invoice.canEdit} kraEtimsStatus={invoice.kraStatus} kraEnabled={kraEnabled} manualDigital={Boolean(invoice.digitalTicketId || invoice.digitalTicket)} invoiceDiscount={invoice.invoiceLevelDiscount} dueAt={invoice.dueAt} terms={invoice.terms} notes={invoice.notes} items={invoice.items} refresh={refresh} />}
       <Grid container spacing={3}>
         <Grid size={{ xs: 12, lg: 8 }}>
           <Card>

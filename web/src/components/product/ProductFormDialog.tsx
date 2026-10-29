@@ -75,7 +75,7 @@ function OpenFormDialog({ title, children, busy = false, error, description, dir
     queueMicrotask(() => { submitted.current = false; });
   };
   return <>
-    <Dialog open onClose={close} transitionDuration={reducedMotion ? 0 : 150} fullWidth maxWidth={maxWidth} aria-labelledby={titleId} aria-describedby={description ? descriptionId : undefined} className="product-ui product-dialog">
+    <Dialog open onClose={close} transitionDuration={reducedMotion ? 0 : 150} fullWidth maxWidth={maxWidth} aria-labelledby={titleId} aria-describedby={description ? descriptionId : undefined} className="product-ui product-dialog" slotProps={{ paper: { sx: { backgroundColor: "var(--glass-solid)" } } }}>
       <Box component="form" ref={attachForm} noValidate onSubmit={submit} onChangeCapture={() => { setEdited(true); setValidation([]); }} sx={{ display: "flex", flexDirection: "column", minHeight: 0, maxHeight: "inherit" }} aria-busy={busy}>
         <DialogTitle id={titleId} sx={{ pb: description ? 1 : 2 }}>{title}</DialogTitle>
         {description && <Typography id={descriptionId} variant="body2" color="text.secondary" px={3} pb={2}>{description}</Typography>}
@@ -84,7 +84,7 @@ function OpenFormDialog({ title, children, busy = false, error, description, dir
         {busy && <LinearProgress aria-label="Saving changes" />}
       </Box>
     </Dialog>
-    <Dialog open={confirmClose} transitionDuration={reducedMotion ? 0 : 150} onClose={() => setConfirmClose(false)} aria-labelledby={`${titleId}-close`} maxWidth="xs" fullWidth className="product-ui product-dialog">
+    <Dialog open={confirmClose} transitionDuration={reducedMotion ? 0 : 150} onClose={() => setConfirmClose(false)} aria-labelledby={`${titleId}-close`} maxWidth="xs" fullWidth className="product-ui product-dialog" slotProps={{ paper: { sx: { backgroundColor: "var(--glass-solid)" } } }}>
       <DialogTitle id={`${titleId}-close`}>Leave this form?</DialogTitle><DialogContent><Typography color="text.secondary">Your changes have not been saved. Keep editing to finish, or close without saving.</Typography></DialogContent><DialogActions sx={{ p: 2, gap: 1 }}><Button onClick={() => setConfirmClose(false)} autoFocus variant="outlined">Keep editing</Button><Button onClick={() => { setConfirmClose(false); onClose(); }}>Close without saving</Button></DialogActions>
     </Dialog>
   </>;

@@ -12,11 +12,13 @@ describe("major business upgrade policies", () => {
     expect(defaultLabourItem("1500.00", "16.00")).toEqual({ description: "Labour Charge", quantity: 1, unitPrice: 1500, taxRate: 16, discount: 0, itemType: "LABOUR" });
   });
 
-  it("allows only unpaid pre-eTIMS drafts to be edited or hard deleted", () => {
+  it("allows eligible invoice amendments but hard deletes only unpaid drafts", () => {
     expect(invoiceCanBeEdited({ status: InvoiceStatus.DRAFT, amountPaid: 0, kraStatus: KraEtimsStatus.NOT_REQUIRED })).toBe(true);
     expect(invoiceDeletionAction({ status: InvoiceStatus.ISSUED, amountPaid: 0, kraStatus: KraEtimsStatus.PENDING })).toBe("VOID");
     expect(invoiceCanBeEdited({ status: InvoiceStatus.DRAFT, amountPaid: 1, kraStatus: KraEtimsStatus.NOT_REQUIRED })).toBe(false);
     expect(invoiceCanBeEdited({ status: InvoiceStatus.DRAFT, amountPaid: 0, kraStatus: KraEtimsStatus.CONFIRMED })).toBe(false);
+    for (const status of [InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.PAID]) expect(invoiceCanBeEdited({ status, amountPaid: 100, kraStatus: KraEtimsStatus.NOT_REQUIRED })).toBe(true);
+    for (const status of [InvoiceStatus.VOID, InvoiceStatus.CANCELLED]) expect(invoiceCanBeEdited({ status, amountPaid: 0, kraStatus: KraEtimsStatus.NOT_REQUIRED })).toBe(false);
   });
 
   it("uses authenticated encryption for recoverable private tracking links", () => {

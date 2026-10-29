@@ -14,11 +14,13 @@ export function invoiceDisplayView(value: unknown, enabled?: boolean): unknown {
 }
 
 export function invoiceCanBeEdited(input: { status: InvoiceStatus; amountPaid: unknown; kraStatus: KraEtimsStatus }): boolean {
-  return input.status === InvoiceStatus.DRAFT && Number(input.amountPaid) === 0 && input.kraStatus !== KraEtimsStatus.SUBMITTED && input.kraStatus !== KraEtimsStatus.CONFIRMED;
+  const issuedStatuses: InvoiceStatus[] = [InvoiceStatus.ISSUED, InvoiceStatus.PARTIALLY_PAID, InvoiceStatus.PAID];
+  const active = input.status === InvoiceStatus.DRAFT ? Number(input.amountPaid) === 0 : issuedStatuses.includes(input.status);
+  return active && input.kraStatus !== KraEtimsStatus.SUBMITTED && input.kraStatus !== KraEtimsStatus.CONFIRMED;
 }
 
 export function invoiceDeletionAction(input: { status: InvoiceStatus; amountPaid: unknown; kraStatus: KraEtimsStatus }): "DELETE" | "VOID" {
-  return invoiceCanBeEdited(input) ? "DELETE" : "VOID";
+  return input.status === InvoiceStatus.DRAFT && invoiceCanBeEdited(input) ? "DELETE" : "VOID";
 }
 
 export function defaultLabourItem(amount: unknown, taxRate: unknown) {

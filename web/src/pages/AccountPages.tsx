@@ -33,6 +33,7 @@ import { DataTable, FormDialog, KeyValue } from "../components/DataViews";
 import { EmptyState, ErrorBlock, LoadingBlock } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { StatusChip } from "../components/StatusChip";
+import { ReviewSettingsPanel } from "../components/ReviewSettingsPanel";
 import type {
   ApiEnvelope,
   AuditLog,
@@ -479,6 +480,7 @@ export function SettingsPage() {
           </FormDialog>
         </Grid>}
         {user?.role === "BUSINESS_ADMIN" && <Grid size={12} role="tabpanel" id="settings-delivery" aria-labelledby="settings-delivery-tab" hidden={section !== "delivery"}>
+          {section === "delivery" && <ReviewSettingsPanel />}
           <Card><CardContent><Typography variant="h6" component="h2" mb={1}>Customer message delivery</Typography><Typography variant="body2" color="text.secondary" mb={2} maxWidth={800}>Intake notifications include the ticket number and private tracking link for repairs, websites, software and AI agents. WhatsApp sends only with customer consent and an approved utility template; ongoing updates follow their communication preference.</Typography>
             <Alert severity={integrations.data?.whatsappTicketTemplate ? "success" : "info"} sx={{ mb: 3 }}>{integrations.data?.whatsappTicketTemplate ? "WhatsApp ticket delivery is configured. Sent means accepted by the provider, not confirmed received." : "WhatsApp credentials or the approved ticket template are missing. Messages stay pending; they are never marked sent without provider acknowledgement. Manual Send to WhatsApp buttons remain available on tickets and invoices."}</Alert>
             {deliveries.isLoading ? <LoadingBlock /> : deliveries.error ? <ErrorBlock message={apiMessage(deliveries.error)} retry={() => void deliveries.refetch()} /> : <Stack divider={<Divider />} spacing={0}>{deliveries.data?.length ? deliveries.data.map(item => <Stack key={item.id} direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", sm: "center" }} gap={2} py={2.5}><Box minWidth={0}><Typography fontWeight={650}>{item.subject ?? "Customer message"}</Typography><Stack direction="row" alignItems="center" gap={1} flexWrap="wrap" mt={0.75}><StatusChip status={item.status} /><Typography variant="body2" color="text.secondary">{item.channel} · {item.repair?.reference ?? item.digitalTicket?.reference ?? "Billing"}</Typography></Stack>{item.failureReason && <Typography variant="caption" color="text.secondary" display="block" mt={1}>{item.failureReason === "DELIVERY_IN_PROGRESS" ? "Delivery retry in progress" : item.failureReason}</Typography>}</Box>{item.channel === "WHATSAPP" && ["PENDING", "FAILED"].includes(item.status) && <Button onClick={() => retryDelivery.mutate(item.id)} disabled={retryDelivery.isPending || !integrations.data?.whatsappTicketTemplate || item.failureReason === "DELIVERY_IN_PROGRESS"}>Retry WhatsApp</Button>}</Stack>) : <EmptyState title="No customer deliveries yet" description="Recorded delivery attempts will appear here. Manual WhatsApp drafts are sent separately by your staff." />}</Stack>}

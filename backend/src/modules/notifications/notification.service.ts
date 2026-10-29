@@ -11,6 +11,7 @@ import { env } from "../../config/env.js";
 import { AppError, notFound } from "../../errors/app-error.js";
 import { decryptPublicToken } from "../../lib/crypto.js";
 import { getBusinessLogoBuffer } from "../../lib/business-logo.js";
+import { getGoogleReviewUrl } from "../../lib/google-review.js";
 import { mailProvider } from "../../lib/mail.js";
 import { prisma } from "../../lib/prisma.js";
 import { renderCustomerEmail, renderRepairEmail } from "./email-templates.js";
@@ -98,7 +99,8 @@ async function deliverRepairEvent(repair: RepairContext, event: RepairNotificati
       if (!notification) return;
       try {
         const logo = await emailLogoForBusiness(repair.businessId);
-        const rendered = renderRepairEmail({ business: repair.business, logoCid: logo.logoCid, customerName: repair.customer.fullName, reference: repair.reference, device, dateReceived: repair.createdAt, trackingUrl, statusLabel: copy.status, message: copy.body, amountDue: amountDue || undefined, currency: repair.business.currency });
+        const reviewUrl = event === "COMPLETED" ? await getGoogleReviewUrl(repair.businessId) : null;
+        const rendered = renderRepairEmail({ business: repair.business, logoCid: logo.logoCid, customerName: repair.customer.fullName, reference: repair.reference, device, dateReceived: repair.createdAt, trackingUrl, statusLabel: copy.status, message: copy.body, amountDue: amountDue || undefined, currency: repair.business.currency, reviewUrl });
         const sent = await mailProvider.send({ to: repair.customer.email, subject: copy.subject, text: rendered.text, html: rendered.html, attachments: logo.attachments });
         await prisma.notification.update({ where: { id: notification.id }, data: { status: NotificationStatus.SENT, sentAt: new Date(), providerId: sent.providerId } });
       } catch {

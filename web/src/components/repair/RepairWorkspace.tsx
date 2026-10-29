@@ -14,6 +14,7 @@ interface Props {
   role?: Role;
   canEdit: boolean;
   trackingUrl?: string;
+  reviewUrl?: string | null;
   trackingBusy: boolean;
   trackingError?: string;
   onRetryTracking(): void;
@@ -21,7 +22,7 @@ interface Props {
   onAddPart(): void;
 }
 
-export function RepairWorkspace({ repair, role, canEdit, trackingUrl, trackingBusy, trackingError, onRetryTracking, onAddNote, onAddPart }: Props) {
+export function RepairWorkspace({ repair, role, canEdit, trackingUrl, reviewUrl, trackingBusy, trackingError, onRetryTracking, onAddNote, onAddPart }: Props) {
   const theme = useTheme();
   const compact = useMediaQuery(theme.breakpoints.down("md"));
   const [noteView, setNoteView] = useState("all");
@@ -84,6 +85,11 @@ export function RepairWorkspace({ repair, role, canEdit, trackingUrl, trackingBu
           {pastEstimate && <Alert severity="warning" sx={{ mt: 2, color: "text.primary" }}>Past estimated completion. {role === "CUSTOMER" ? "Contact the workshop for an updated expected date." : "Review progress and update the customer where appropriate."}</Alert>}
           {canEdit && <><Divider sx={{ my: 3 }} /><Typography variant="subtitle2" mb={1.5}>Customer tracking</Typography><WhatsAppShareButton customerName={repair.customer.fullName} phone={repair.customer.phone} whatsappPhone={repair.customer.whatsappPhone} reference={repair.reference} trackingUrl={trackingUrl} serviceLabel="Repair" disabled={trackingBusy || Boolean(trackingError)} />{trackingUrl && <Button size="small" startIcon={<ContentCopy />} onClick={() => void copyTracking()} sx={{ mt: 1 }}>Copy tracking link</Button>}{copyFeedback && <Typography role="status" variant="caption" display="block" mt={1}>{copyFeedback}</Typography>}{trackingError && <Alert severity="error" sx={{ mt: 1.5 }} action={<Button color="inherit" onClick={onRetryTracking}>Retry</Button>}>{trackingError}</Alert>}</>}
         </CardContent></Card>
+        {canEdit && ["COMPLETED", "READY_FOR_COLLECTION", "COLLECTED"].includes(repair.status) && <Card component="section" aria-labelledby="repair-review-title" sx={{ mt: 3 }}><CardContent sx={{ p: { xs: 2.5, md: 3 } }}>
+          <Typography id="repair-review-title" variant="h6" component="h2">Customer review</Typography>
+          <Typography variant="body2" color="text.secondary" mt={1} mb={2}>Invite an honest review after the completed repair.</Typography>
+          {reviewUrl ? <WhatsAppShareButton label="Request Google review" customerName={repair.customer.fullName} phone={repair.customer.phone} whatsappPhone={repair.customer.whatsappPhone} reference={repair.reference} reviewUrl={reviewUrl} trackingUrl={trackingUrl} /> : trackingBusy ? <Typography role="status" variant="body2">Loading review link…</Typography> : <Typography variant="body2" color="text.secondary">{trackingError ? "The review link could not be loaded. Retry customer tracking above." : "Ask an administrator to add the Google review link in Settings → Delivery."}</Typography>}
+        </CardContent></Card>}
         <Card component="section" aria-labelledby="repair-timeline-title" sx={{ mt: 3 }}><CardContent sx={{ p: { xs: 2.5, md: 3 } }}>
           <Typography id="repair-timeline-title" variant="h6" component="h2">Status timeline</Typography><Typography variant="caption" color="text.secondary">Recorded stage changes · latest first</Typography>
           {repair.statusHistory.length ? <Stack component="ol" sx={{ listStyle: "none", p: 0, m: 0, mt: 3 }}>{[...repair.statusHistory].reverse().map((entry, index) => <Box component="li" key={entry.id} sx={{ position: "relative", pl: 2.5, pb: index < repair.statusHistory.length - 1 ? 3 : 0, borderLeft: index < repair.statusHistory.length - 1 ? 1 : 0, borderColor: "divider" }}><Box sx={{ position: "absolute", left: -4, top: 5, width: 7, height: 7, borderRadius: "50%", bgcolor: index ? "text.disabled" : "primary.main" }} /><Typography variant="body2" fontWeight={650}>{sentenceCase(entry.toStatus)}</Typography><Typography variant="caption" color="text.secondary">{repairDate(entry.createdAt, true)}</Typography>{entry.customerMessage && <Typography variant="body2" color="text.secondary" mt={1} sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{entry.customerMessage}</Typography>}</Box>)}</Stack> : <Typography variant="body2" color="text.secondary" mt={2}>No stage history has been recorded.</Typography>}

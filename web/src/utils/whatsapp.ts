@@ -1,6 +1,7 @@
 export interface WhatsAppShareDetails {
   trackingUrl?: string;
   invoiceUrl?: string;
+  reviewUrl?: string | null;
 }
 
 export interface WhatsAppShareInput extends WhatsAppShareDetails {
@@ -50,6 +51,17 @@ function plainLine(value: string, max: number): string {
   return value.replace(/[\p{Cc}\u202a-\u202e\u2066-\u2069]/gu, " ").trim().slice(0, max);
 }
 
+export function isGoogleReviewLink(value: string): boolean {
+  if (value.length > 2048 || /[\s\p{Cc}\\]/u.test(value)) return false;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password || url.port || url.hash) return false;
+    return (url.hostname === "g.page" && /^\/r\/[A-Za-z0-9_-]+\/review\/?$/.test(url.pathname))
+      || (["search.google.com", "www.google.com", "google.com"].includes(url.hostname) && url.pathname === "/local/writereview" && /^[A-Za-z0-9_-]{5,256}$/.test(url.searchParams.get("placeid") ?? ""))
+      || (url.hostname === "maps.app.goo.gl" && /^\/[A-Za-z0-9]+\/?$/.test(url.pathname));
+  } catch { return false; }
+}
+
 /** Private URLs stay local until an operator explicitly opens WhatsApp. */
 export function buildWhatsAppShare(input: WhatsAppShareInput, origin: string): WhatsAppShareResult {
   const recipient = input.whatsappPhone?.trim() || input.phone?.trim() || "";
@@ -59,8 +71,10 @@ export function buildWhatsAppShare(input: WhatsAppShareInput, origin: string): W
   if (!reference) return { ok: false, reason: "A ticket or invoice reference is required." };
   const tracking = input.trackingUrl ? firstPartyLink(input.trackingUrl, origin, "tracking") : null;
   const invoice = input.invoiceUrl ? firstPartyLink(input.invoiceUrl, origin, "invoice") : null;
+  const review = input.reviewUrl && isGoogleReviewLink(input.reviewUrl) ? input.reviewUrl : null;
+  if (input.reviewUrl && !review) return { ok: false, reason: "Add a valid Google review link in Settings → Delivery." };
   if ((input.trackingUrl && !tracking) || (input.invoiceUrl && !invoice)) return { ok: false, reason: "A valid RepairTrack sharing link is required. Reload the page and try again." };
-  if (!tracking && !invoice) return { ok: false, reason: "The sharing link is not available yet." };
+  if (!tracking && !invoice && !review) return { ok: false, reason: "The sharing link is not available yet." };
 
   const greeting = plainLine(input.customerName, 120);
   const lines = [greeting ? `Hello ${greeting},` : "Hello,", "", "RepairTrack by Husaini Tech Solutions"];
@@ -74,6 +88,7 @@ export function buildWhatsAppShare(input: WhatsAppShareInput, origin: string): W
     lines.push(`${plainLine(input.serviceLabel || "Repair", 64)} ticket: ${reference}`);
   }
   if (tracking) lines.push(`Track your request: ${tracking}`, "Please keep your private tracking link secure.");
+  if (review) lines.push("", "Your repair is complete. Thank you for choosing us. You are welcome to share an honest review of your experience:", review);
   const message = lines.join("\n");
   return { ok: true, message, href: `https://wa.me/${phone}?text=${encodeURIComponent(message)}` };
 }

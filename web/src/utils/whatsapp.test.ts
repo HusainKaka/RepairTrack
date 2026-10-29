@@ -11,6 +11,19 @@ describe("WhatsApp phone normalization", () => {
 });
 
 describe("private WhatsApp drafts", () => {
+  it("includes the owner's Google review link in a manually opened completion draft", () => {
+    const result = buildWhatsAppShare({ ...input, reviewUrl: "https://g.page/r/Cbadgp9VKwYjEBI/review" }, origin);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const draft = new URL(result.href);
+    expect(draft.hostname).toBe("wa.me");
+    expect(draft.searchParams.get("text")).toContain("Your repair is complete");
+    expect(draft.searchParams.get("text")).toContain("https://g.page/r/Cbadgp9VKwYjEBI/review");
+    expect(draft.searchParams.get("text")).toContain(input.trackingUrl);
+  });
+  it("rejects unrelated, script and impersonated Google review destinations", () => {
+    for (const reviewUrl of ["javascript:alert(1)", "https://g.page.evil.test/r/a/review", "https://evil.test", "https://www.google.com/url?url=https://evil.test"]) expect(buildWhatsAppShare({ ...input, reviewUrl }, origin).ok).toBe(false);
+  });
   it("encodes the full message, name and tracking link without extra query parameters", () => {
     const result = buildWhatsAppShare(input, origin);
     expect(result.ok).toBe(true);

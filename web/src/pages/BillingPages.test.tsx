@@ -3,8 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), role: "BUSINESS_ADMIN" }));
-vi.mock("../api/client", () => ({ api: { get: mocks.get, post: mocks.post }, apiMessage: () => "Request unavailable" }));
+const mocks = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), role: "BUSINESS_ADMIN" }));
+vi.mock("../api/client", () => ({ api: { get: mocks.get, post: mocks.post, patch: mocks.patch }, apiMessage: () => "Request unavailable" }));
 vi.mock("../auth/AuthProvider", () => ({ useAuth: () => ({ user: { role: mocks.role } }) }));
 import { InvoiceDetailPage, InvoicesPage } from "./BillingPages";
 import { invoiceAmountPreview } from "../components/InvoiceManagementPanel";
@@ -30,6 +30,35 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("digital manual billing and KRA feature gate", () => {
+  it("updates an issued discount only with a reason and retains a failed edit", async () => {
+    mocks.patch.mockRejectedValue(new Error("Network unavailable"));
+    mount(<InvoiceDetailPage />, "/invoices/view-id", "/invoices/:id");
+    fireEvent.click(await screen.findByRole("button", { name: "Edit invoice" }));
+    const save = screen.getByRole("button", { name: "Save" });
+    expect(save).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Invoice-level discount"), { target: { value: "100" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /Reason for change/ }), { target: { value: "Agreed customer discount" } });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await waitFor(() => expect(mocks.patch).toHaveBeenCalledWith("/invoices/view-id", expect.objectContaining({ invoiceDiscount: 100, changeReason: "Agreed customer discount" })));
+    await screen.findByText("Request unavailable");
+    expect(screen.getByLabelText("Invoice-level discount")).toHaveValue(100);
+  });
+  it("prevents discount changes from reducing a paid invoice below payments", async () => {
+    mocks.get.mockResolvedValue({ data: { data: { ...invoice, status: "PAID", paymentStatus: "PAID", amountPaid: "1000", balance: "0" } } });
+    mount(<InvoiceDetailPage />, "/invoices/view-id", "/invoices/:id");
+    fireEvent.click(await screen.findByRole("button", { name: "Edit invoice" }));
+    fireEvent.change(screen.getByLabelText("Invoice-level discount"), { target: { value: "1" } });
+    fireEvent.change(screen.getByRole("textbox", { name: /Reason for change/ }), { target: { value: "Correction" } });
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Void invoice" })).not.toBeInTheDocument();
+  });
+  it("does not show issued-edit controls to customers", async () => {
+    mocks.role = "CUSTOMER";
+    mount(<InvoiceDetailPage />, "/invoices/view-id", "/invoices/:id");
+    await screen.findByText("Example business");
+    expect(screen.queryByRole("button", { name: "Edit invoice" })).not.toBeInTheDocument();
+  });
   it("previews discounted tax accurately and blocks excessive discounts or quantities", async () => {
     mount(<InvoicesPage />, "/invoices?digitalTicketId=digital-id", "/invoices");
     await screen.findByText(/Manual digital invoice:/);

@@ -36,6 +36,8 @@ interface Props {
   invoiceId: string;
   status: string;
   paymentStatus: string;
+  amountPaid?: string;
+  canEditInvoice?: boolean;
   kraEtimsStatus?: string;
   kraEnabled?: boolean;
   manualDigital?: boolean;
@@ -96,6 +98,8 @@ export function InvoiceManagementPanel({
   invoiceId,
   status,
   paymentStatus,
+  amountPaid = "0",
+  canEditInvoice,
   kraEtimsStatus,
   kraEnabled = false,
   manualDigital = false,
@@ -108,11 +112,11 @@ export function InvoiceManagementPanel({
 }: Props) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const editable =
-    status === "DRAFT" &&
-    paymentStatus === "UNPAID" &&
+  const editable = canEditInvoice ?? (
+    ["DRAFT", "ISSUED", "PARTIALLY_PAID", "PAID"].includes(status) &&
+    (status !== "DRAFT" || paymentStatus === "UNPAID") &&
     (!kraEtimsStatus ||
-      ["NOT_REQUIRED", "PENDING", "FAILED"].includes(kraEtimsStatus));
+      ["NOT_REQUIRED", "PENDING", "FAILED"].includes(kraEtimsStatus)));
   const [itemOpen, setItemOpen] = useState(false);
   const [editing, setEditing] = useState<Item | null>(null);
   const [line, setLine] = useState(emptyItem);
@@ -127,11 +131,15 @@ export function InvoiceManagementPanel({
   const [invoiceDeleteOpen, setInvoiceDeleteOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [notice, setNotice] = useState("");
+  const [changeReason, setChangeReason] = useState("");
+  const issued = status !== "DRAFT";
+  const reasonValid = !issued || changeReason.trim().length >= 3;
+  const canVoid = editable && ["DRAFT", "ISSUED"].includes(status) && paymentStatus === "UNPAID";
   const inventory = useQuery({
     queryKey: ["inventory"],
     queryFn: async () =>
       (await api.get<ApiEnvelope<InventoryItem[]>>("/inventory")).data.data,
-    enabled: editable && !manualDigital,
+    enabled: editable && !manualDigital && itemOpen,
   });
   const selectedInventory = inventory.data?.find((item) => item.id === line.inventoryItemId);
   const candidateLine = {
@@ -150,6 +158,7 @@ export function InvoiceManagementPanel({
     mutationFn: () => {
       const payload = {
         itemType: line.itemType,
+        changeReason: issued ? changeReason.trim() : undefined,
         inventoryItemId:
           line.itemType === "INVENTORY" ? line.inventoryItemId : undefined,
         description: line.description || undefined,
@@ -179,6 +188,7 @@ export function InvoiceManagementPanel({
         dueAt: settings.dueAt ? new Date(settings.dueAt).toISOString() : null,
         terms: settings.terms || null,
         notes: settings.notes || null,
+        changeReason: issued ? changeReason.trim() : undefined,
       }),
     onSuccess: async () => {
       setSettingsOpen(false);
@@ -187,7 +197,7 @@ export function InvoiceManagementPanel({
   });
   const deleteLine = useMutation({
     mutationFn: () =>
-      api.delete(`/invoices/${invoiceId}/items/${removeItem!.id}`),
+      api.delete(`/invoices/${invoiceId}/items/${removeItem!.id}`, { data: { changeReason: issued ? changeReason.trim() : undefined } }),
     onSuccess: async () => {
       setRemoveItem(null);
       await refresh();
@@ -220,6 +230,8 @@ export function InvoiceManagementPanel({
     },
   });
   const beginEdit = (item: Item) => {
+    setChangeReason("");
+    saveLine.reset();
     setEditing(item);
     setLine({
       itemType: item.itemType ?? "CUSTOM",
@@ -232,7 +244,7 @@ export function InvoiceManagementPanel({
     });
     setItemOpen(true);
   };
-  if (!editable && status !== "ISSUED" && status !== "DRAFT")
+  if (!editable && !canVoid)
     return (
       <>
         {notice && (
@@ -240,6 +252,7 @@ export function InvoiceManagementPanel({
             {notice}
           </Alert>
         )}
+        {["ISSUED", "PARTIALLY_PAID", "PAID"].includes(status) && <Alert severity="info" sx={{ mb: 3 }}>{kraEnabled ? "This invoice has been submitted or confirmed by eTIMS. Use the configured adjustment process rather than editing it directly." : "This invoice is finalized and cannot be edited directly. Contact the administrator about the supported adjustment process."}</Alert>}
       </>
     );
   return (
@@ -253,7 +266,7 @@ export function InvoiceManagementPanel({
           <div>
             <Typography variant="h6">Invoice controls</Typography>
             <Typography color="text.secondary" variant="body2">
-              {manualDigital ? "Manual project charges, discounts, and safe deletion are audited." : "Draft editing, inventory links, discounts, and safe deletion are audited."}
+              {issued ? "Amend charges, discounts, due date and terms. A reason is recorded; payments and the invoice number are preserved. Resend the revised invoice after saving." : manualDigital ? "Manual project charges, discounts, and safe deletion are audited." : "Draft editing, inventory links, discounts, and safe deletion are audited."}
             </Typography>
           </div>
           <Stack direction="row" flexWrap="wrap" gap={1}>
@@ -263,6 +276,8 @@ export function InvoiceManagementPanel({
                   startIcon={<Add />}
                   onClick={() => {
                     setEditing(null);
+                    setChangeReason("");
+                    saveLine.reset();
                     setLine(emptyItem);
                     setItemOpen(true);
                   }}
@@ -271,7 +286,8 @@ export function InvoiceManagementPanel({
                 </Button>
                 <Button
                   startIcon={<EditOutlined />}
-                  onClick={() => setSettingsOpen(true)}
+                  variant="outlined"
+                  onClick={() => { setSettings({ invoiceDiscount, dueAt: dueAt ? new Date(new Date(dueAt).getTime() - new Date(dueAt).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "", terms: terms ?? "", notes: notes ?? "" }); setChangeReason(""); saveSettings.reset(); setSettingsOpen(true); }}
                 >
                   Edit invoice
                 </Button>
@@ -286,13 +302,13 @@ export function InvoiceManagementPanel({
                 Submit to eTIMS
               </Button>
             )}
-            <Button
+            {canVoid && <Button
               color="error"
               startIcon={<DeleteOutline />}
               onClick={() => setInvoiceDeleteOpen(true)}
             >
               {status === "DRAFT" ? "Delete draft" : "Void invoice"}
-            </Button>
+            </Button>}
           </Stack>
         </Stack>
         {notice && (
@@ -317,8 +333,8 @@ export function InvoiceManagementPanel({
                   borderColor="divider"
                   borderRadius={2}
                 >
-                  <div style={{ flex: 1 }}>
-                    <Typography fontWeight={700}>{item.description}</Typography>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <Typography fontWeight={700} title={item.description} sx={{ overflowWrap: "break-word", display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2, overflow: "hidden" }}>{item.description}</Typography>
                     <Typography variant="caption">
                       {item.itemType ?? "CUSTOM"} · {item.quantity} × KES{" "}
                       {Number(item.unitPrice).toLocaleString()}
@@ -332,7 +348,7 @@ export function InvoiceManagementPanel({
                   <Tooltip title="Remove">
                     <IconButton
                       color="error"
-                      onClick={() => setRemoveItem(item)}
+                      onClick={() => { setChangeReason(""); deleteLine.reset(); setRemoveItem(item); }}
                     >
                       <DeleteOutline />
                     </IconButton>
@@ -350,7 +366,7 @@ export function InvoiceManagementPanel({
           onClose={() => setItemOpen(false)}
           onSubmit={() => saveLine.mutate()}
           submitLabel={editing ? "Save line" : "Add line"}
-          submitDisabled={!completeLine || !linePreview.valid}
+          submitDisabled={!completeLine || !linePreview.valid || !reasonValid || (linePreview.valid && linePreview.total < Number(amountPaid))}
         >
           <TextField
             select
@@ -447,17 +463,19 @@ export function InvoiceManagementPanel({
           <Alert severity={linePreview.valid ? "info" : "warning"}>
             {linePreview.valid ? `Estimated invoice total: KES ${linePreview.total.toLocaleString()}` : linePreview.message}
           </Alert>
+          {issued && <TextField required label="Reason for change" value={changeReason} onChange={event => setChangeReason(event.target.value)} slotProps={{ htmlInput: { minLength: 3, maxLength: 500 } }} helperText="Recorded in the audit trail for this issued invoice." />}
+          {linePreview.valid && linePreview.total < Number(amountPaid) && <Alert severity="warning">The revised total cannot be below KES {Number(amountPaid).toLocaleString()} already paid. A credit/refund must be recorded first.</Alert>}
         </FormDialog>
         <FormDialog
           open={settingsOpen}
-          title="Edit draft invoice"
+          title={issued ? "Update issued invoice" : "Edit draft invoice"}
           busy={saveSettings.isPending}
           error={
             saveSettings.error ? apiMessage(saveSettings.error) : undefined
           }
           onClose={() => setSettingsOpen(false)}
           onSubmit={() => saveSettings.mutate()}
-          submitDisabled={!settingsPreview.valid}
+          submitDisabled={!settingsPreview.valid || !reasonValid || (settingsPreview.valid && settingsPreview.total < Number(amountPaid))}
         >
           <TextField
             type="datetime-local"
@@ -498,6 +516,8 @@ export function InvoiceManagementPanel({
           <Alert severity={settingsPreview.valid ? "info" : "warning"}>
             {settingsPreview.valid ? `Estimated invoice total: KES ${settingsPreview.total.toLocaleString()}` : settingsPreview.message}
           </Alert>
+          {issued && <TextField required label="Reason for change" value={changeReason} onChange={event => setChangeReason(event.target.value)} slotProps={{ htmlInput: { minLength: 3, maxLength: 500 } }} helperText="Recorded with the previous and revised totals and discount." />}
+          {settingsPreview.valid && settingsPreview.total < Number(amountPaid) && <Alert severity="warning">The revised total cannot be below KES {Number(amountPaid).toLocaleString()} already paid. A credit/refund must be recorded first.</Alert>}
         </FormDialog>
         <FormDialog
           open={Boolean(removeItem)}
@@ -507,11 +527,13 @@ export function InvoiceManagementPanel({
           onClose={() => setRemoveItem(null)}
           onSubmit={() => deleteLine.mutate()}
           submitLabel="Remove line"
+          submitDisabled={!reasonValid}
         >
           <Alert severity="warning">
             Remove “{removeItem?.description}”? At least one item must remain on
             the invoice.
           </Alert>
+          {issued && <TextField required label="Reason for change" value={changeReason} onChange={event => setChangeReason(event.target.value)} slotProps={{ htmlInput: { minLength: 3, maxLength: 500 } }} />}
         </FormDialog>
         <FormDialog
           open={invoiceDeleteOpen}

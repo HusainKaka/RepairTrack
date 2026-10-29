@@ -12,6 +12,7 @@ import { authenticate } from "../../middleware/authenticate.js";
 import { authorize, requireBusiness } from "../../middleware/authorize.js";
 import { routeParam, validate } from "../../middleware/validate.js";
 import { createInternalNotification, notifyRepairCreated, notifyRepairStatus } from "../notifications/notification.service.js";
+import { getGoogleReviewUrl } from "../../lib/google-review.js";
 import { whatsappConsentUpdate } from "../customers/whatsapp-consent.js";
 
 const router = Router();
@@ -142,13 +143,15 @@ router.get("/:id", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN, RoleC
 });
 
 router.get("/:id/tracking", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN), validate(z.object({ id: z.uuid() }), "params"), async (request, response) => {
-  const repair = await prisma.repair.findFirst({ where: { id: routeParam(request.params.id), businessId: requireBusiness(request), deletedAt: null, ...technicianRestriction(request) }, select: { publicTrackingTokenEncrypted: true } });
+  const businessId = requireBusiness(request);
+  const repair = await prisma.repair.findFirst({ where: { id: routeParam(request.params.id), businessId, deletedAt: null, ...technicianRestriction(request) }, select: { publicTrackingTokenEncrypted: true, status: true } });
   if (!repair) throw notFound("Repair");
   if (!repair.publicTrackingTokenEncrypted) throw new AppError(409, "TRACKING_LINK_UNAVAILABLE", "The tracking link is unavailable for this legacy repair. Contact the administrator.");
   let trackingToken: string;
   try { trackingToken = decryptPublicToken(repair.publicTrackingTokenEncrypted); } catch { throw new AppError(409, "TRACKING_LINK_UNAVAILABLE", "The tracking link is unavailable. Contact the administrator."); }
   if (!/^[A-Za-z0-9_-]{43}$/.test(trackingToken)) throw new AppError(409, "TRACKING_LINK_UNAVAILABLE", "The tracking link is unavailable. Contact the administrator.");
-  response.json({ success: true, data: { trackingUrl: `${env.PUBLIC_WEB_URL.replace(/\/$/, "")}/track/${encodeURIComponent(trackingToken)}` } });
+  const reviewUrl = ["COMPLETED", "READY_FOR_COLLECTION", "COLLECTED"].includes(repair.status) ? await getGoogleReviewUrl(businessId) : null;
+  response.json({ success: true, data: { trackingUrl: `${env.PUBLIC_WEB_URL.replace(/\/$/, "")}/track/${encodeURIComponent(trackingToken)}`, reviewUrl } });
 });
 
 router.patch("/:id", authorize(RoleCode.BUSINESS_ADMIN, RoleCode.TECHNICIAN), validate(repairInputSchema.omit({ customerId: true, newCustomer: true, deviceId: true, newDevice: true, assignedTechnicianId: true }).partial()), async (request, response) => {

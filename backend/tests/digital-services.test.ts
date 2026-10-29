@@ -188,7 +188,7 @@ describe("manual digital invoices", () => {
 describe("invoice transaction safety", () => {
   it("checks editable state inside each transaction rather than trusting a stale outer draft", async () => {
     mocks.invoice.findFirst.mockResolvedValue({ id: ticketId, status: "DRAFT", amountPaid: 0, kraStatus: "NOT_REQUIRED" });
-    const current = vi.fn().mockResolvedValue({ id: ticketId, status: "ISSUED", amountPaid: 0, kraStatus: "NOT_REQUIRED" });
+    const current = vi.fn().mockResolvedValue({ id: ticketId, status: "VOID", amountPaid: 0, kraStatus: "NOT_REQUIRED" });
     mocks.$transaction.mockImplementation(async (callback: any) => callback({ ...mocks, invoice: { ...mocks.invoice, findFirst: current } }));
     const authorization = `Bearer ${token()}`;
     await request(app).patch(`/invoices/${ticketId}`).set("authorization", authorization).send({ notes: "changed" }).expect(409);

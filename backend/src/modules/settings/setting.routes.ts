@@ -4,6 +4,7 @@ import { z } from "zod";
 import { env } from "../../config/env.js";
 import { AppError } from "../../errors/app-error.js";
 import { BUSINESS_LOGO_KEY } from "../../lib/business-logo.js";
+import { GOOGLE_REVIEW_SETTING, getGoogleReviewUrl, googleReviewUrl } from "../../lib/google-review.js";
 import { whatsappTicketConfigured } from "../notifications/whatsapp-provider.js";
 import { writeAudit } from "../../lib/audit.js";
 import { prisma } from "../../lib/prisma.js";
@@ -42,11 +43,27 @@ router.put("/tax", authorize(RoleCode.BUSINESS_ADMIN), validate(z.object({ etims
   response.json({ success: true, data: setting });
 });
 
+router.get("/reviews", authorize(RoleCode.BUSINESS_ADMIN), async (request, response) => {
+  response.json({ success: true, data: { googleReviewUrl: await getGoogleReviewUrl(requireBusiness(request)) } });
+});
+
+router.put("/reviews", authorize(RoleCode.BUSINESS_ADMIN), validate(z.object({ googleReviewUrl: z.string().trim().max(2048).nullable() }).strict()), async (request, response) => {
+  const businessId = requireBusiness(request);
+  const supplied = request.body.googleReviewUrl;
+  const url = supplied ? googleReviewUrl(supplied) : null;
+  if (supplied && !url) throw new AppError(422, "INVALID_GOOGLE_REVIEW_URL", "Paste the HTTPS Ask for reviews link from your Google Business Profile.");
+  await prisma.$transaction(async tx => {
+    await tx.setting.upsert({ where: { scope_key: { scope: `business:${businessId}`, key: GOOGLE_REVIEW_SETTING } }, update: { value: { googleReviewUrl: url } }, create: { businessId, scope: `business:${businessId}`, key: GOOGLE_REVIEW_SETTING, value: { googleReviewUrl: url } } });
+    await writeAudit(tx, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "GOOGLE_REVIEW_SETTINGS_UPDATED", resourceType: "business", resourceId: businessId, metadata: { enabled: Boolean(url) } });
+  });
+  response.json({ success: true, data: { googleReviewUrl: url } });
+});
+
 router.put("/:key", validate(z.object({ value: z.json() })), async (request, response) => {
   const businessId = request.auth!.role === RoleCode.BUSINESS_ADMIN ? requireBusiness(request) : null;
   const scope = businessId ? `business:${businessId}` : "platform";
   const key = routeParam(request.params.key, "setting key");
-  if (key === BUSINESS_LOGO_KEY || key.startsWith("business.logo.")) throw new AppError(403, "RESERVED_SETTING", "Use the business logo upload control to change this reserved setting.");
+  if (key === BUSINESS_LOGO_KEY || key.startsWith("business.logo.") || key === GOOGLE_REVIEW_SETTING) throw new AppError(403, "RESERVED_SETTING", "Use the dedicated business settings control to change this reserved setting.");
   const setting = await prisma.setting.upsert({ where: { scope_key: { scope, key } }, update: { value: request.body.value }, create: { businessId, scope, key, value: request.body.value } });
   await writeAudit(prisma, request, { businessId, userId: request.auth!.userId, userRole: request.auth!.role, action: "SETTING_CHANGED", resourceType: "setting", resourceId: setting.id, metadata: { key: setting.key } });
   response.json({ success: true, data: setting });
