@@ -6,6 +6,7 @@ import { env } from "../../config/env.js";
 import { AppError, notFound } from "../../errors/app-error.js";
 import { writeAudit } from "../../lib/audit.js";
 import { getBusinessLogoDataUrl } from "../../lib/business-logo.js";
+import { customerInvoiceSelect as publicInvoiceSelect } from "../../lib/customer-invoice.js";
 import { createOpaqueToken, decryptPublicToken, encryptPublicToken, hashToken } from "../../lib/crypto.js";
 import { nextDocumentNumber } from "../../lib/identifiers.js";
 import { prisma } from "../../lib/prisma.js";
@@ -50,7 +51,6 @@ export const digitalIntakeSchema = editableFields.extend({
 });
 
 const timelineSelect = { id: true, fromStatus: true, toStatus: true, customerMessage: true, createdAt: true } as const;
-const publicInvoiceSelect = { number: true, status: true, paymentStatus: true, total: true, balance: true } as const;
 const activeInvoices = { deletedAt: null, status: { notIn: ["CANCELLED", "VOID"] } } satisfies Prisma.InvoiceWhereInput;
 const trackingUrl = (token: string) => `${env.PUBLIC_WEB_URL.replace(/\/$/, "")}/track/digital/${encodeURIComponent(token)}`;
 

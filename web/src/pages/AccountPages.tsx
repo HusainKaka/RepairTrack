@@ -34,6 +34,8 @@ import { EmptyState, ErrorBlock, LoadingBlock } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { StatusChip } from "../components/StatusChip";
 import { ReviewSettingsPanel } from "../components/ReviewSettingsPanel";
+import { CustomerPricingBreakdown } from "../components/CustomerPricingBreakdown";
+import type { CustomerPricing } from "../types";
 import type {
   ApiEnvelope,
   AuditLog,
@@ -951,7 +953,7 @@ export function CustomerDetailPage() {
 interface PublicRepair {
   reference: string;
   device: { type: string; brand: string; model: string };
-  business: { name: string; logoImageUrl?: string; phone: string };
+  business: { name: string; logoImageUrl?: string; phone: string; currency?: string };
   dateReceived: string;
   status: string;
   customerFirstName: string;
@@ -959,12 +961,12 @@ interface PublicRepair {
   estimatedCompletionAt?: string;
   approval?: { version: number; estimateAmount: number; message?: string; items: { description: string; quantity: string; unitPrice: string; lineTotal: string }[] } | null;
   customerResponse?: { decision: string; declineReason?: string; approvalVersion: number; createdAt: string } | null;
-  invoices: {
+  invoices: (CustomerPricing & {
     number: string;
     status: string;
     paymentStatus: string;
     balance: string;
-  }[];
+  })[];
   statusHistory: {
     toStatus: string;
     customerMessage?: string;
@@ -1117,27 +1119,22 @@ export function PublicTrackPage() {
               <Alert severity="info">{repair.customerVisibleNotes}</Alert>
             )}
             {responseNotice && <Alert severity="success" sx={{ mt: 2 }}>{responseNotice}</Alert>}
-            {repair.approval && <Card variant="outlined" sx={{ mt: 3, borderColor: "primary.main" }}><CardContent><Typography variant="h6">Estimate approval required</Typography><Typography color="text.secondary">Hello {repair.customerFirstName}, review estimate version {repair.approval.version} before the repair continues.</Typography>{repair.approval.items.length > 0 && <DataTable columns={["Item", "Quantity", "Unit price", "Total"]} rows={repair.approval.items.map((item) => [item.description, Number(item.quantity), `KES ${Number(item.unitPrice).toLocaleString()}`, `KES ${Number(item.lineTotal).toLocaleString()}`])} />}<Typography variant="h5" mt={2}>Estimated total: KES {repair.approval.estimateAmount.toLocaleString()}</Typography><TextField fullWidth multiline minRows={2} label="Reason if declining" value={declineReason} onChange={(event) => setDeclineReason(event.target.value)} sx={{ mt: 2 }} /><Stack direction={{ xs: "column", sm: "row" }} gap={1.5} mt={2}><Button variant="contained" onClick={() => respond.mutate("ACCEPTED")} disabled={respond.isPending}>Accept estimate</Button><Button color="error" variant="outlined" onClick={() => respond.mutate("DECLINED")} disabled={respond.isPending || declineReason.trim().length < 3}>Decline estimate</Button></Stack>{respond.error && <Alert severity="error" sx={{ mt: 2 }}>{apiMessage(respond.error)}</Alert>}<Typography variant="caption" color="text.secondary" display="block" mt={2}>Your response is versioned, time-stamped, and cannot be submitted twice.</Typography></CardContent></Card>}
+            {repair.approval && <Card variant="outlined" sx={{ mt: 3, borderColor: "primary.main" }}><CardContent><Typography variant="h6">Estimate approval required</Typography><Typography color="text.secondary">Hello {repair.customerFirstName}, review estimate version {repair.approval.version} before the repair continues.</Typography>{repair.invoices[0] ? <CustomerPricingBreakdown invoice={repair.invoices[0]} currency={repair.business.currency} /> : <Typography variant="h5" mt={2}>Estimated total: {repair.business.currency ?? "KES"} {repair.approval.estimateAmount.toLocaleString()}</Typography>}<TextField fullWidth multiline minRows={2} label="Reason if declining" value={declineReason} onChange={(event) => setDeclineReason(event.target.value)} sx={{ mt: 2 }} /><Stack direction={{ xs: "column", sm: "row" }} gap={1.5} mt={2}><Button variant="contained" onClick={() => respond.mutate("ACCEPTED")} disabled={respond.isPending}>Accept estimate</Button><Button color="error" variant="outlined" onClick={() => respond.mutate("DECLINED")} disabled={respond.isPending || declineReason.trim().length < 3}>Decline estimate</Button></Stack>{respond.error && <Alert severity="error" sx={{ mt: 2 }}>{apiMessage(respond.error)}</Alert>}<Typography variant="caption" color="text.secondary" display="block" mt={2}>Your response is versioned, time-stamped, and cannot be submitted twice.</Typography></CardContent></Card>}
             {repair.customerResponse && <Alert severity="info" sx={{ mt: 2 }}>Response recorded: {repair.customerResponse.decision.replaceAll("_", " ")}{repair.customerResponse.declineReason ? ` — ${repair.customerResponse.declineReason}` : ""}</Alert>}
-            {repair.invoices.length > 0 && (
+            {repair.invoices.length > (repair.approval ? 1 : 0) && (
               <>
                 <Divider sx={{ my: 3 }} />
                 <Typography variant="h6" mb={1}>
-                  Billing status
+                  Pricing breakdown
                 </Typography>
-                {repair.invoices.map((invoice) => (
-                  <Stack
+                {repair.invoices.slice(repair.approval ? 1 : 0).map((invoice) => (
+                  <Box
                     key={invoice.number}
-                    direction={{ xs: "column", sm: "row" }}
-                    justifyContent="space-between"
-                    py={1}
+                    py={2}
                   >
-                    <span>{invoice.number}</span>
-                    <span>
-                      {invoice.paymentStatus.replaceAll("_", " ")} · Balance KES{" "}
-                      {Number(invoice.balance).toLocaleString()}
-                    </span>
-                  </Stack>
+                    <Stack direction="row" flexWrap="wrap" justifyContent="space-between" alignItems="center" gap={1}><Typography fontWeight={700} sx={{ overflowWrap: "anywhere" }}>{invoice.number}</Typography><StatusChip status={invoice.paymentStatus} /></Stack>
+                    <CustomerPricingBreakdown invoice={invoice} currency={repair.business.currency} />
+                  </Box>
                 ))}
               </>
             )}

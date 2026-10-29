@@ -73,6 +73,18 @@ export interface InventoryItem {
   minimumStock: number;
   location?: string;
 }
+export interface CustomerPricing {
+  status: string;
+  subtotal?: string | number;
+  taxAmount?: string | number;
+  discountAmount?: string | number;
+  invoiceLevelDiscount?: string | number;
+  total?: string | number;
+  amountPaid?: string | number;
+  balance: string | number;
+  items?: { description: string; quantity: string | number; unitPrice: string | number; discount?: string | number; taxRate?: string | number; lineTotal: string | number }[];
+}
+
 export interface Invoice {
   id: string;
   number: string;
@@ -151,7 +163,7 @@ export interface PublicDigitalTicket {
     customerMessage?: string | null;
     createdAt: string;
   }[];
-  invoices: Pick<Invoice, "number" | "status" | "paymentStatus" | "total" | "balance">[];
+  invoices: (Pick<Invoice, "number" | "status" | "paymentStatus" | "total" | "balance"> & CustomerPricing)[];
   notes?: { body: string; createdAt: string; visibility?: "INTERNAL" | "CUSTOMER" }[];
 }
 

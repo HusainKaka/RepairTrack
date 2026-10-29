@@ -12,6 +12,7 @@ import { Link, useLocation, useParams, useSearchParams } from "react-router-dom"
 import { api, apiMessage } from "../api/client";
 import { useAuth } from "../auth/AuthProvider";
 import { BrandLogo } from "../components/BrandLogo";
+import { CustomerPricingBreakdown } from "../components/CustomerPricingBreakdown";
 import { CreateButton, DataTable, FormDialog, KeyValue } from "../components/DataViews";
 import { EmptyState, ErrorBlock, LoadingBlock } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
@@ -259,7 +260,7 @@ export function PublicDigitalTrackPage() {
       <Grid container spacing={3} mt={2}><Grid size={{ xs: 12, sm: 6 }}><KeyValue label="Received" value={new Date(ticket.dateReceived).toLocaleDateString()} /></Grid><Grid size={{ xs: 12, sm: 6 }}><KeyValue label="Estimated delivery" value={ticket.estimatedCompletionAt ? new Date(ticket.estimatedCompletionAt).toLocaleDateString() : "Not scheduled"} /></Grid></Grid>
       <Divider sx={{ my: 3 }} /><Typography variant="h6">Progress</Typography><ProgressHistory entries={ticket.statusHistory} />{ticket.customerVisibleNotes && <Alert severity="info">{ticket.customerVisibleNotes}</Alert>}
       {customerNotes.length > 0 && <><Divider sx={{ my: 3 }} /><Typography variant="h6" mb={2}>Project updates</Typography>{customerNotes.map((entry, index) => <Box key={`${entry.createdAt}-${index}`} py={1}><Typography sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{entry.body}</Typography><Typography variant="caption" color="text.secondary">{new Date(entry.createdAt).toLocaleString()}</Typography></Box>)}</>}
-      {ticket.invoices.length > 0 && <><Divider sx={{ my: 3 }} /><Typography variant="h6" mb={2}>Billing status</Typography>{ticket.invoices.map((invoice) => <Stack key={invoice.number} direction={{ xs: "column", sm: "row" }} justifyContent="space-between" gap={1} py={1}><Typography fontWeight={700}>{invoice.number}</Typography><Typography>{invoice.paymentStatus.replaceAll("_", " ")} · Balance {currency} {Number(invoice.balance).toLocaleString()}</Typography></Stack>)}</>}
+      {ticket.invoices.length > 0 && <><Divider sx={{ my: 3 }} /><Typography variant="h6" mb={2}>Pricing breakdown</Typography>{ticket.invoices.map((invoice) => <Box key={invoice.number} py={2}><Stack direction="row" flexWrap="wrap" justifyContent="space-between" gap={1}><Typography fontWeight={700} sx={{ overflowWrap: "anywhere" }}>{invoice.number}</Typography><StatusChip status={invoice.paymentStatus} /></Stack><CustomerPricingBreakdown invoice={invoice} currency={currency} /></Box>)}</>}
       <Typography variant="body2" color="text.secondary" mt={4}>For project changes or delivery arrangements, contact {ticket.business.name} at {ticket.business.phone}.</Typography>
     </CardContent></Card>
   </Box></Box>;

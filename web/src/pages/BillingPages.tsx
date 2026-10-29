@@ -45,6 +45,7 @@ import { EmptyState, ErrorBlock, LoadingBlock } from "../components/Feedback";
 import { PageHeader } from "../components/PageHeader";
 import { StatusChip } from "../components/StatusChip";
 import { InvoiceManagementPanel, invoiceAmountPreview } from "../components/InvoiceManagementPanel";
+import { CustomerPricingBreakdown } from "../components/CustomerPricingBreakdown";
 import { WhatsAppShareButton } from "../components/WhatsAppShareButton";
 import type { ApiEnvelope, Customer, DigitalTicket, Invoice, Repair } from "../types";
 
@@ -619,7 +620,7 @@ export function InvoiceDetailPage() {
                 </Box>
               </Stack>
               <Divider sx={{ my: 3 }} />
-              <DataTable
+              {user?.role === "CUSTOMER" ? <CustomerPricingBreakdown invoice={invoice} currency={invoice.business.currency} showPayments={false} /> : <><DataTable
                 columns={[
                   "Description",
                   "Quantity",
@@ -656,6 +657,7 @@ export function InvoiceDetailPage() {
                   Total KES {Number(invoice.total).toLocaleString()}
                 </Typography>
               </Stack>
+              </>}
               {invoice.terms && (
                 <Alert severity="info" sx={{ mt: 3 }}>
                   {invoice.terms}

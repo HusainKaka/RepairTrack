@@ -230,4 +230,13 @@ describe("one-click private invoice sharing", () => {
     expect(popup.location.replace).not.toHaveBeenCalled();
     expect(screen.queryByText("private provider details")).not.toBeInTheDocument();
   });
+  it("shows item and invoice discounts separately on the signed-in customer's invoice", async () => {
+    mocks.role = "CUSTOMER";
+    mocks.get.mockResolvedValue({ data: { data: { ...invoice, subtotal: "1000", discountAmount: "150", invoiceLevelDiscount: "100", total: "850", balance: "850", items: [{ ...invoice.items[0], discount: "50", lineTotal: "950" }] } } });
+    mount(<InvoiceDetailPage />, "/invoices/view-id", "/invoices/:id");
+    await screen.findByText("Invoice discount");
+    expect(screen.getByText("Invoice discount").nextElementSibling).toHaveTextContent("KES 100.00");
+    expect(screen.getByText("Item discounts").nextElementSibling).toHaveTextContent("KES 50.00");
+    expect(screen.queryByRole("button", { name: "Edit invoice" })).not.toBeInTheDocument();
+  });
 });
